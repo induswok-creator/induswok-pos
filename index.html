@@ -6,7 +6,7 @@
 <title>Indus Wok — Restaurant POS</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Crect rx=%2714%27 width=%2764%27 height=%2764%27 fill=%27%23b91327%27/%3E%3Ctext x=%2732%27 y=%2739%27 text-anchor=%27middle%27 font-size=%2730%27 font-family=%27Arial%27 fill=%27white%27%3E🥢%3C/text%3E%3C/svg%3E">
 <meta name="theme-color" content="#b91327">
-<meta name="app-version" content="14.0.0">
+<meta name="app-version" content="14.0.1">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="robots" content="noindex,nofollow">
@@ -1025,6 +1025,7 @@
             <div id="deviceNamePreview" style="font-size:12px;margin-top:6px;color:var(--muted)"></div>
           </div>
           <div class="card" style="margin-top:14px"><h3>☁️ Live Multi-Device Sync (Firebase)</h3>
+            <div id="fbCfgHint" class="muted" style="font-size:11px;margin-bottom:8px"></div>
             <p class="muted" style="font-size:12px;margin-top:0">58MM v13.5 — Print & Sync Hardened: safe cart migration, recent settled-bill recovery, stale-phone protection, double-settlement guard, and explicit offline mode. Both phones can bill randomly; set a Device Name above. Enter your Firebase project config to sync data across all devices in real time. Get this from Firebase Console → Project Settings → General → Your apps → Web app.</p>
             <div class="field"><input id="setFirebaseApiKey" placeholder="Firebase API Key (e.g. AIza...)" style="margin-bottom:6px"></div>
             <div class="field"><input id="setFirebaseProjectId" placeholder="Firebase Project ID (e.g. my-pos-1234)" style="margin-bottom:6px"></div>
@@ -1098,7 +1099,7 @@ const LS='induswok_pos_v1';
 // not a security boundary; protect Firestore and rotate this value before use.
 const DEV_SECRET_PIN='8746';
 const MENU_VERSION=3; // kept for legacy data; no longer triggers any auto-replace
-const APP_VERSION='14.0.0'; // v14: Netlify + new Firebase, menu/settings/cart/date hardening
+const APP_VERSION='14.0.1'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
 // v14: hardcoded defaults of the OLD Firebase project — scrubbed from saved data so
 // upgraded devices can't silently reconnect to the retired database.
 const OLD_FB_DEFAULTS={firebaseApiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM',firebaseProjectId:'induswokpos',firebaseAppId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec'};
@@ -4040,7 +4041,9 @@ function fillSettings(){
   $('#setBillRoll').value=s.billRoll;$('#setBillFont').value=s.billFont;$('#setBillAutoPrint').checked=!!s.billAutoPrint;
   $('#setKotRoll').value=s.kotRoll;$('#setKotFont').value=s.kotFont;$('#setKotAutoPrint').checked=!!s.kotAutoPrint;
   $('#setRawbtBill').checked=!!s.rawbtBill;$('#setRawbtKot').checked=!!s.rawbtKot;$('#setRawbtChars').value=s.rawbtChars||32;$('#setRawbtQR').checked=!!s.rawbtQR;$('#setRawbtCut').checked=!!s.rawbtCut;if($('#setAutoTableQrKitchen'))$('#setAutoTableQrKitchen').checked=s.autoTableQrKitchen!==false;
-  $('#setFirebaseApiKey').value=s.firebaseApiKey||'';$('#setFirebaseProjectId').value=s.firebaseProjectId||'';$('#setFirebaseAppId').value=s.firebaseAppId||'';$('#setFirebaseDocPath').value=s.firebaseDocPath||'pos/default';$('#setAiProv').value=s.aiProv;$('#setAiKey').value=s.aiKey;
+  const _fbc=(typeof fbConf==='function')?fbConf():{apiKey:'',projectId:'',appId:'',docPath:'pos/induswok-default'};
+  $('#setFirebaseApiKey').value=s.firebaseApiKey||_fbc.apiKey||'';$('#setFirebaseProjectId').value=s.firebaseProjectId||_fbc.projectId||'';$('#setFirebaseAppId').value=s.firebaseAppId||_fbc.appId||'';$('#setFirebaseDocPath').value=s.firebaseDocPath||_fbc.docPath||'pos/induswok-default';$('#setAiProv').value=s.aiProv;$('#setAiKey').value=s.aiKey;
+  try{const _h=document.getElementById('fbCfgHint'); if(_h)_h.textContent=(!s.firebaseApiKey&&_fbc.apiKey)?'✅ Auto-filled from firebase-config.js':'Settings-page values override firebase-config.js on THIS device.';}catch(e){}
   renderUsers();try{renderRbac();}catch(e){}updateSyncStatusUI();
   try{
     const dn=localStorage.getItem(DEVICE_NAME_KEY)||'';
@@ -4069,7 +4072,7 @@ function saveFirebase(){
   DB.settings.firebaseProjectId=$('#setFirebaseProjectId').value.trim();
   DB.settings.firebaseAppId=$('#setFirebaseAppId').value.trim();
   DB.settings.firebaseDocPath=$('#setFirebaseDocPath').value.trim()||'pos/default';
-  persist();toast('Firebase config saved');startSync();
+  markMeta('settingsAt');save();toast('Firebase config saved');startSync();
 }
 // v14: effective Firebase config — Settings page first, then firebase-config.js.
 function fbConf(){
@@ -4082,7 +4085,7 @@ function firebaseEnabled(){
   const c=fbConf();
   return !!(c.apiKey && c.projectId);
 }
-function saveAi(){DB.settings.aiProv=$('#setAiProv').value;DB.settings.aiKey=$('#setAiKey').value.trim();save();toast('AI key saved');}
+function saveAi(){DB.settings.aiProv=$('#setAiProv').value;DB.settings.aiKey=$('#setAiKey').value.trim();markMeta('settingsAt');save();toast('AI key saved');}
 function canManageUserPins(){return CUR&&(CUR.role==='Owner'||CUR.role==='Developer');}
 function renderUsers(){
   const tb=$('#usersTable tbody');tb.innerHTML='';
@@ -4945,7 +4948,8 @@ function refreshActivePage(){
     try{renderCart();}catch(e){}
     return;
   }
-  const map={dash:renderDash,tables:renderTables,kds:renderKDS,print:renderPrintStation,menu:renderMenuMgr,sales:renderReports,exp:renderExpenses,inv:renderInv,vendors:renderVendors,customers:renderCustomers,staff:renderStaff,payroll:renderPayroll,settings:fillSettings};
+  if(id==='settings')return; // v14.1: fillSettings used to run every 2s heartbeat and ERASED unsaved edits — settings re-fills only when you open the tab
+  const map={dash:renderDash,tables:renderTables,kds:renderKDS,print:renderPrintStation,menu:renderMenuMgr,sales:renderReports,exp:renderExpenses,inv:renderInv,vendors:renderVendors,customers:renderCustomers,staff:renderStaff,payroll:renderPayroll};
   if(map[id])map[id]();
   if(typeof updateDayBadge==='function')updateDayBadge();
 }
