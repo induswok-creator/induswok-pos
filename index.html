@@ -6,7 +6,11 @@
 <title>Indus Wok — Restaurant POS</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Crect rx=%2714%27 width=%2764%27 height=%2764%27 fill=%27%23b91327%27/%3E%3Ctext x=%2732%27 y=%2739%27 text-anchor=%27middle%27 font-size=%2730%27 font-family=%27Arial%27 fill=%27white%27%3E🥢%3C/text%3E%3C/svg%3E">
 <meta name="theme-color" content="#b91327">
-<meta name="app-version" content="14.0.2">
+<meta name="app-version" content="14.0.3">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="IndusWok POS">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="robots" content="noindex,nofollow">
@@ -1099,7 +1103,7 @@ const LS='induswok_pos_v1';
 // not a security boundary; protect Firestore and rotate this value before use.
 const DEV_SECRET_PIN='8746';
 const MENU_VERSION=3; // kept for legacy data; no longer triggers any auto-replace
-const APP_VERSION='14.0.2'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
+const APP_VERSION='14.0.3'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
 // v14: hardcoded defaults of the OLD Firebase project — scrubbed from saved data so
 // upgraded devices can't silently reconnect to the retired database.
 const OLD_FB_DEFAULTS={firebaseApiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM',firebaseProjectId:'induswokpos',firebaseAppId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec'};
@@ -5276,6 +5280,10 @@ async function boot(){
   }
   renderLogin();updateBootSyncUI();
 }
+// v14.3: PWA service worker — network-first (icons-only cache), enables real
+// "Install app" on Android/Windows; never traps stale HTML/JS.
+if('serviceWorker' in navigator){ window.addEventListener('load', function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); }); }
+
 boot();
 </script>
 
@@ -5399,19 +5407,13 @@ window.resolveTableRequest=async function(fid){
 function startQrListener(){
   if(qrListenerUnsub) return;
   try{
-    if(typeof firebase==='undefined' || !firebase.apps.length){
-      // try init with built-in config
-      if(typeof firebaseEnabled==='function' && firebaseEnabled()){
-        // firebase already initialized by main app
-      } else {
-        // fallback init
-        firebase.initializeApp({
-          apiKey: "AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM",
-          authDomain: "induswokpos.firebaseapp.com",
-          projectId: "induswokpos",
-          appId: "1:761865480325:web:2ff33ec8a2e00dd057e1ec"
-        });
-      }
+    if(typeof firebase==='undefined')return;
+    if(!firebase.apps.length){
+      // v14.2: initialize ONLY via the shared config (initFirebase/fbConf). The old
+      // fallback used to silently connect this device to the RETIRED project — and
+      // because Firebase inits once per page, it hijacked the whole app's sync.
+      try{ if(typeof initFirebase==='function') initFirebase(); }catch(e){}
+      if(!firebase.apps.length) return;
     }
     const db = firebase.firestore();
     qrListenerUnsub = db.collection(QR_COLLECTION)
