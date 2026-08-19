@@ -6,7 +6,7 @@
 <title>Indus Wok — Restaurant POS</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Crect rx=%2714%27 width=%2764%27 height=%2764%27 fill=%27%23b91327%27/%3E%3Ctext x=%2732%27 y=%2739%27 text-anchor=%27middle%27 font-size=%2730%27 font-family=%27Arial%27 fill=%27white%27%3E🥢%3C/text%3E%3C/svg%3E">
 <meta name="theme-color" content="#b91327">
-<meta name="app-version" content="14.0.1">
+<meta name="app-version" content="14.0.2">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="robots" content="noindex,nofollow">
@@ -1099,7 +1099,7 @@ const LS='induswok_pos_v1';
 // not a security boundary; protect Firestore and rotate this value before use.
 const DEV_SECRET_PIN='8746';
 const MENU_VERSION=3; // kept for legacy data; no longer triggers any auto-replace
-const APP_VERSION='14.0.1'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
+const APP_VERSION='14.0.2'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
 // v14: hardcoded defaults of the OLD Firebase project — scrubbed from saved data so
 // upgraded devices can't silently reconnect to the retired database.
 const OLD_FB_DEFAULTS={firebaseApiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM',firebaseProjectId:'induswokpos',firebaseAppId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec'};
@@ -1800,12 +1800,18 @@ let curArea=null;
      try{ _origRenderDash(); }catch(e){}
      try{
        const bd = (typeof businessDate==='function'?businessDate():todayStr());
-       const syncOk = !!(DB.settings.syncUrl||'').trim();
        const box = document.getElementById('daySessionInfo');
-       if(box && !syncOk && !box.querySelector('.sync-warn')){
-         box.insertAdjacentHTML('afterbegin', '<div class="card sync-warn" style="margin-bottom:12px;border-left:4px solid var(--warn);background:#fffbe6">⚠️ Sync OFF – Settings → Live Multi-Device Sync → paste the same Web App URL on ALL devices so Owner / Waiter / Cashier see the same orders.</div>');
+       // v14.2: judge by REAL Firebase state (was: legacy Apps-Script syncUrl —
+       // the banner lied even while live sync was working).
+       const fbOn = (typeof firebaseEnabled==='function') && firebaseEnabled();
+       const live = fbOn && (typeof _syncOnline!=='undefined' ? _syncOnline : false);
+       if(box && !live && !box.querySelector('.sync-warn')){
+         const txt = fbOn
+           ? '📴 Sync configured but this device is offline right now — check internet; the ☁️ badge reconnects automatically.'
+           : '⚠️ Sync OFF – open Settings → Live Multi-Device Sync: Firebase fields are auto-filled from firebase-config.js. Deploy the SAME firebase-config.js build to all devices.';
+         box.insertAdjacentHTML('afterbegin', '<div class="card sync-warn" style="margin-bottom:12px;border-left:4px solid var(--warn);background:#fffbe6">'+txt+'</div>');
        }
-       if(box && syncOk){
+       if(box && live){
          const w = box.querySelector('.sync-warn'); if(w) w.remove();
        }
      }catch(e){}
