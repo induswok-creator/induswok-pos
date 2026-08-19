@@ -72,3 +72,8 @@ merge · 700 KB auto-archive · QR inbox with alerts · printer device-locality.
 # v14.1
 - ROOT CAUSE of settings reverting while typing: a 2-second heartbeat re-rendered the Settings form from saved values, erasing in-progress edits. Fixed — form only refreshes on tab open.
 - Firebase settings fields autofill from firebase-config.js; saveFirebase/saveAi now stamp + sync properly.
+
+# v14.6
+- "Notification is not defined" crash fixed (Android WebView lacks the Notification API — alerts button now routes to the native service, and shows a clear message in odd browsers)
+- Zomato-style always-on alerts: foreground service polls new QR orders every 20s, restarts after reboot, asks for battery-optimization exemption once, loud notification + vibration even when app is closed
+- v14.5 branding: real logo on favicon/login/PWA/launcher/notifications; iOS WKWebView source added (ios-app/)

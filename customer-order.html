@@ -307,10 +307,32 @@ const tableIdParam = urlParams.get('tid') || urlParams.get('tableId') || '';
 const tableNoParam = urlParams.get('no') || '';
 const tableAreaParam = urlParams.get('area') || '';
 const srcParam = (urlParams.get('src') || '').toLowerCase();
+const modeParam = (urlParams.get('mode') || '').toLowerCase();
 const isTableQr = !!(tableIdParam || tableNoParam || srcParam.includes('qr_table') || srcParam.includes('qr_dinein'));
-if(tableParam){ document.getElementById('tableLabel').textContent = (isTableQr ? 'Dine-in: ' : 'Table: ') + decodeURIComponent(tableParam) + ' • Mumbai'; }
+// v14.9b: order mode from the QR link — delivery needs an address, takeaway/counter doesn't.
+// Default for links without a mode: delivery (needs address) — the previous label fell
+// back to 'delivery' which made table-prefixed headers look wrong.
+const isDeliveryOrder = !isTableQr && (modeParam==='delivery' || !modeParam || modeParam==='delivery-home');
+if(tableParam){ document.getElementById('tableLabel').textContent = (isTableQr ? 'Dine-in: ' : (isDeliveryOrder?'🚚 Delivery to: ':'🛍️ Pickup at: ')) + decodeURIComponent(tableParam) + ' • Mumbai'; }
 function setupOrderMode(){
-  if(!isTableQr) return;
+  if(!isTableQr){
+    // v14.9b: counter-qr mode branding — delivery: address mandatory; takeaway/counter: optional
+    const set=(id,txt)=>{ const el=document.getElementById(id); if(el) el.textContent=txt; };
+    if(isDeliveryOrder){
+      set('heroTitle','🚚 Delivery — Indus Wok');
+      set('detailsTitle','👤 Delivery details');
+      set('addrLabel','Delivery Address *');
+      const al=document.getElementById('addrLabel'); if(al) al.textContent='Delivery Address *';
+      const aw=document.getElementById('addrWrap'); if(aw) aw.style.display='block';
+    } else {
+      set('heroTitle','🛍️ Pickup — Indus Wok');
+      set('detailsTitle','👤 Your details');
+      set('addrLabel','Pickup note (optional)');
+      const aw=document.getElementById('addrWrap'); if(aw) aw.style.display='none';
+      const dp=document.getElementById('deliveryPartner'); if(dp) dp.value='Self Pickup';
+    }
+    return;
+  }
   const label = decodeURIComponent(tableParam || (tableNoParam ? ('Table '+tableNoParam) : 'Your Table'));
   const set=(id,txt)=>{ const el=document.getElementById(id); if(el) el.textContent=txt; };
   set('heroTitle','Order for '+label+' 📱');
@@ -510,7 +532,7 @@ async function placeOrder(){
   const name = document.getElementById('cName').value.trim();
   const phone = document.getElementById('cPhone').value.trim();
   const addr = document.getElementById('cAddr').value.trim();
-  if(!name || !phone || (!isTableQr && !addr)){ alert(isTableQr ? 'Please fill Name and Phone' : 'Please fill Name, Phone and Address'); return; }
+  if(!name || !phone || (isDeliveryOrder && !addr)){ alert(isTableQr ? 'Please fill Name and Phone' : (isDeliveryOrder ? 'Please fill Name, Phone and Delivery Address' : 'Please fill Name and Phone')); return; }
   if(cart.length===0){ alert('Cart empty'); return; }
   const dupKey='iw_last_order_'+(tableIdParam||tableParam||'online');
   const dupPayload=JSON.stringify(cart.map(i=>[i.id,i.qty,i.price,i.size||'full',i.modKey||'']));
@@ -529,10 +551,10 @@ async function placeOrder(){
     tableId: tableIdParam,
     tableNo: tableNoParam,
     tableArea: tableAreaParam,
-    orderType: isTableQr ? 'dinein' : 'online',
+    orderType: isTableQr ? 'dinein' : (isDeliveryOrder ? 'delivery' : 'takeaway'),
     items: cart.map(c=>({id:c.id||'', name:c.name, qty:c.qty, price:c.price, size:c.size||'full', mods:c.mods||[], note:c.note||''})),
     subtotal: sub, gst, total,
-    deliveryPartner: isTableQr ? 'Dine-in Table' : document.getElementById('deliveryPartner').value,
+    deliveryPartner: isTableQr ? 'Dine-in Table' : (isDeliveryOrder ? document.getElementById('deliveryPartner').value : 'Self Pickup'),
     status: 'new',
     source: isTableQr ? 'qr_table' : 'qr_customer',
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),

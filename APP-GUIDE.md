@@ -1,6 +1,6 @@
 # 📱 App Guide — install Indus Wok POS like a native app
 
-Live URL: **https://posinduswok.netlify.app/**
+Live URL: **https://induswok-pos.induswok.workers.dev/**
 
 ## Option 1 — Install straight from the browser (30 seconds, recommended)
 
@@ -37,7 +37,7 @@ Setup:
 If you want an installable file you can share directly (e.g. via WhatsApp) or later publish on Play Store:
 
 1. Go to <https://www.pwabuilder.com>
-2. Enter `https://posinduswok.netlify.app` → it scores the PWA (all green with v14.3)
+2. Enter `https://induswok-pos.induswok.workers.dev` → it scores the PWA (all green with v14.3)
 3. Click **Package For Android** → Download → you get a signed **AAB + APK**
 4. Share the APK with staff; or upload the AAB to Play Console if you want a Play Store listing (needs a one-time $25 Google developer account)
 

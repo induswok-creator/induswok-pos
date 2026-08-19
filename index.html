@@ -4,15 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Indus Wok — Restaurant POS</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Crect rx=%2714%27 width=%2764%27 height=%2764%27 fill=%27%23b91327%27/%3E%3Ctext x=%2732%27 y=%2739%27 text-anchor=%27middle%27 font-size=%2730%27 font-family=%27Arial%27 fill=%27white%27%3E🥢%3C/text%3E%3C/svg%3E">
+<link rel="icon" type="image/png" href="favicon.png">
 <meta name="theme-color" content="#b91327">
-<meta name="app-version" content="14.0.4">
+<meta name="app-version" content="14.0.6">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="IndusWok POS">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="robots" content="noindex,nofollow">
 
 <!-- SheetJS for Excel parsing (works online; CSV works offline without it) -->
@@ -301,7 +301,7 @@
 <!-- ================= LOGIN ================= -->
 <div id="login">
   <div class="login-card">
-    <div class="logo">🥢</div>
+    <div class="logo"><img src="logo.png" alt="Indus Wok" style="width:120px;border-radius:18px;box-shadow:0 6px 18px rgba(0,0,0,.25)"></div>
     <div class="brand">Indus Wok</div>
     <div class="brand-sub">Restaurant POS · v14 · Sync-Safe Edition</div>
     <div class="user-select" id="userSelect"></div>
@@ -1109,7 +1109,7 @@ const LS='induswok_pos_v1';
 // not a security boundary; protect Firestore and rotate this value before use.
 const DEV_SECRET_PIN='8746';
 const MENU_VERSION=3; // kept for legacy data; no longer triggers any auto-replace
-const APP_VERSION='14.0.4'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
+const APP_VERSION='14.0.6'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
 // v14: hardcoded defaults of the OLD Firebase project — scrubbed from saved data so
 // upgraded devices can't silently reconnect to the retired database.
 const OLD_FB_DEFAULTS={firebaseApiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM',firebaseProjectId:'induswokpos',firebaseAppId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec'};
@@ -5095,7 +5095,7 @@ function notifyNewOrder(keys){
   toast('🔔 New order: '+names.join(', '));
   if(typeof speakAnnouncement==='function') speakAnnouncement('New order alert for ' + names.join(', '));
   if('Notification' in window && Notification.permission==='granted'){
-    try{ new Notification('🔔 Indus Wok new order', {body:names.join(', '), icon:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect rx="14" width="64" height="64" fill="%23b91327"/><text x="32" y="39" text-anchor="middle" font-size="30" fill="white">🥢</text></svg>'}); }catch(e){}
+    try{ new Notification('🔔 Indus Wok new order', {body:names.join(', '), icon:'icon-192.png'}); }catch(e){}
   }
   const b=document.getElementById('orderAlert');
   if(b){
@@ -5355,10 +5355,21 @@ window.qrTestSound = ()=>{ qrBeep(2); toast('🔊 Sound test'); };
 // ---- NOTIFICATIONS ----
 async function qrEnableNotify(){
   try{
+    // v14.6: Android WebView has no Notification API — inside the IndusWok app,
+    // route to the native always-on background alert service instead.
+    if(typeof Notification==='undefined'){
+      if(window.IWNativePrint && window.IWNativePrint.enableOrderAlerts){
+        window.IWNativePrint.enableOrderAlerts();
+        toast('🔔 Background order alerts ON (app)');
+      } else {
+        toast('Notifications need Chrome or the IndusWok app','warning');
+      }
+      return;
+    }
     const perm = await Notification.requestPermission();
     if(perm==='granted'){ toast('🔔 Browser alerts enabled'); qrBeep(1); }
     else toast('Notifications blocked','warning');
-  }catch(e){ toast(e.message,'error'); }
+  }catch(e){ toast(String(e&&e.message||e),'error'); }
 }
 window.qrEnableNotify = qrEnableNotify;
 
@@ -5368,7 +5379,7 @@ function pushNotify(title, body){
   if(navigator.vibrate) navigator.vibrate([200,100,200,100,400]);
   // browser notification
   if('Notification' in window && Notification.permission==='granted'){
-    try{ new Notification(title, {body, icon:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect rx="14" width="64" height="64" fill="%23b91327"/><text x="32" y="39" text-anchor="middle" font-size="30" fill="white">🥢</text></svg>'}); }catch(e){}
+    try{ new Notification(title, {body, icon:'icon-192.png'}); }catch(e){}
   }
   // visual alert bar
   const bar = document.getElementById('orderAlert');
@@ -5815,7 +5826,11 @@ window.generateCustomerQr = function(){
   const t = (!custom && typeof DB!=='undefined' && DB.tables) ? DB.tables.find(x=>x.id===chosen) : null;
   const label = custom || (t ? tableDisplay(t) : chosen);
   const base = location.origin + location.pathname.replace(/index\.html?$/,'').replace(/\/$/, '/');
-  const extra = t ? ('&tid='+encodeURIComponent(t.id)+'&no='+encodeURIComponent(t.no||'')+'&area='+encodeURIComponent(t.area||'')+'&src=qr_table') : '&src=qr_customer';
+  // v14.9b: keep an explicit mode on counter links so the customer page can show the
+  // right form (delivery ⇒ address REQUIRED, takeaway/counter ⇒ address optional)
+  const mode = !t ? (chosen==='delivery' ? 'delivery' : chosen==='takeaway' ? 'takeaway' : 'counter') : '';
+  const extra = t ? ('&tid='+encodeURIComponent(t.id)+'&no='+encodeURIComponent(t.no||'')+'&area='+encodeURIComponent(t.area||'')+'&src=qr_table')
+                  : ('&src=qr_customer&mode='+mode);
   const url = base + 'customer-order.html?table=' + encodeURIComponent(label) + extra + '&r=' + Date.now().toString(36);
   const out = document.getElementById('qrOutput');
   const qrImg = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(url)}&qzone=1`;

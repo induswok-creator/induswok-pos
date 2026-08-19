@@ -7,6 +7,7 @@ import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -27,7 +28,7 @@ import java.util.UUID;
 /**
  * IndusWok POS — WebView shell + direct Bluetooth ESC/POS printing bridge.
  *
- * The web app (https://posinduswok.netlify.app/) calls window.IWNativePrint.* :
+ * The web app (https://induswok-pos.induswok.workers.dev/) calls window.IWNativePrint.* :
  *   available()            -> bridge present (always true inside the app)
  *   status()               -> current printer name or ""
  *   print(escPosText)      -> prints raw ESC/POS text; returns true on success
@@ -39,7 +40,7 @@ import java.util.UUID;
  */
 public class MainActivity extends Activity {
 
-    private static final String APP_URL = "https://posinduswok.netlify.app/";
+    private static final String APP_URL = "https://induswok-pos.induswok.workers.dev/";
     private static final String PREFS = "iw_pos_prefs";
     private static final String KEY_ADDR = "printer_addr";
     private static final String KEY_NAME = "printer_name";
@@ -67,6 +68,39 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new PrinterBridge(), "IWNativePrint");
         web.loadUrl(APP_URL);
         setContentView(web);
+
+        requestNotifPermissionIfNeeded();
+        startOrderWatcher(); // always-on QR order alerts (Zomato-style)
+    }
+
+    // ---------- background order alerts ----------
+    private void startOrderWatcher() {
+        try {
+            Intent svc = new Intent(this, OrderNotifyService.class);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(svc);
+            else startService(svc);
+        } catch (Throwable t) { android.util.Log.w("IW", "svc start: " + t.getMessage()); }
+    }
+
+    private void requestNotifPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 42);
+        }
+    }
+
+    private void promptBatteryExemption() {
+        if (Build.VERSION.SDK_INT < 23) return;
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+            String pkg = getPackageName();
+            if (pm != null && !pm.isIgnoringBatteryOptimizations(pkg)) {
+                startActivity(new android.content.Intent(
+                        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        android.net.Uri.parse("package:" + pkg)));
+                toastOnUi("Pick ALLOW so order alerts keep working in background");
+            }
+        } catch (Throwable ignored) {}
     }
 
     private SharedPreferences prefs() { return getSharedPreferences(PREFS, MODE_PRIVATE); }
@@ -157,6 +191,15 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface public void pickPrinter() { showPrinterPicker(); }
+
+        /** "🔔 Enable Alerts" button inside the POS lands here in the app. */
+        @JavascriptInterface public boolean enableOrderAlerts() {
+            requestNotifPermissionIfNeeded();
+            startOrderWatcher();
+            promptBatteryExemption();
+            toastOnUi("🔔 Order alerts ON — works even when the app is closed");
+            return true;
+        }
     }
 
     private void toastOnUi(final String msg) {
@@ -202,6 +245,16 @@ public class MainActivity extends Activity {
     // ---------- lifecycle ----------
     @Override public void onBackPressed() {
         if (web != null && web.canGoBack()) web.goBack(); else super.onBackPressed();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        // staff saw the order → silence the siren
+        try {
+            Intent stop = new Intent(this, OrderNotifyService.class);
+            stop.setAction(OrderNotifyService.ACTION_STOP_SIREN);
+            startService(stop);
+        } catch (Throwable ignored) {}
     }
 
     @Override protected void onDestroy() {
