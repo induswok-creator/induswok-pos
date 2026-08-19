@@ -193,6 +193,7 @@ public class OrderNotifyService extends Service {
     @Override public void onDestroy() {
         running = false;
         stopSiren();
+        closePrinter();
         try { if (handler != null) handler.removeCallbacks(pollTask); } catch (Exception ignored) {}
         try { if (bgHandler != null) bgHandler.removeCallbacks(pollTask); } catch (Exception ignored) {}
         try { if (bgThread != null) bgThread.quitSafely(); } catch (Exception ignored) {}
@@ -202,6 +203,7 @@ public class OrderNotifyService extends Service {
 
     // ---------- polling ----------
     private void pollOnce() throws Exception {
+        pollPrintJobs();   // v15.3: remote "print this at the restaurant" jobs
         String url = "https://firestore.googleapis.com/v1/projects/" + PROJECT_ID
                 + "/databases/(default)/documents/" + COLLECTION
                 + "?key=" + API_KEY + "&pageSize=3&orderBy=createdAt%20desc";
@@ -363,6 +365,109 @@ public class OrderNotifyService extends Service {
         nm.notify((int) (System.currentTimeMillis() % 100000), b.build());
         startSiren();  // siren keeps ringing ~60s until staff opens the app
         wakeScreen();
+    }
+
+    // ---------- v15.3: remote print jobs (owner prints KOT from home) ----------
+    private static final String JOBS_COLLECTION = "induswok_print_jobs";
+
+    private void pollPrintJobs() {
+        try {
+            String url = "https://firestore.googleapis.com/v1/projects/" + PROJECT_ID
+                    + "/databases/(default)/documents/" + JOBS_COLLECTION
+                    + "?key=" + API_KEY + "&pageSize=5&orderBy=createdAt%20desc";
+            HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+            c.setConnectTimeout(10000); c.setReadTimeout(10000);
+            int code = c.getResponseCode();
+            InputStream is = code >= 200 && code < 300 ? c.getInputStream() : null;
+            if (is == null) { c.disconnect(); return; }
+            String body = readAll(is); c.disconnect();
+            JSONObject root = new JSONObject(body);
+            JSONArray docs = root.optJSONArray("documents");
+            if (docs == null) return;
+            long nowMs = System.currentTimeMillis();
+            for (int i = 0; i < docs.length(); i++) {
+                JSONObject d = docs.getJSONObject(i);
+                JSONObject f = d.optJSONObject("fields"); if (f == null) continue;
+                String status = optStr(f, "status");
+                if ("done".equals(status)) continue;
+                long ts = orderTs(f);
+                if (ts > 0 && nowMs - ts > 20 * 60 * 1000) { markJobDone(d.getString("name")); continue; } // stale job — drop quietly
+                String text = optStr(f, "text");
+                String table = optStr(f, "table");
+                if (text.isEmpty()) { markJobDone(d.getString("name")); continue; }
+                boolean printed = printerWrite(text);
+                if (printed) {
+                    markJobDone(d.getString("name"));
+                    quietNotify("🖨️ Remote KOT printed" + (table.isEmpty() ? "" : " — " + table));
+                    diag = "printed remote job " + hhmmss(nowMs);
+                } else {
+                    diag = "remote print failed (printer?) " + hhmmss(nowMs);
+                }
+            }
+        } catch (Exception e) {
+            Log.w("IW", "print-jobs poll: " + e.getMessage());
+        }
+    }
+
+    private void markJobDone(String docName) {
+        HttpURLConnection c = null;
+        try {
+            String url = "https://firestore.googleapis.com/v1/" + docName
+                    + "?key=" + API_KEY + "&currentDocument.exists=true"
+                    + "&updateMask.fieldPaths=status&updateMask.fieldPaths=printedAt";
+            c = (HttpURLConnection) new URL(url).openConnection();
+            c.setRequestMethod("PATCH");
+            c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            c.setDoOutput(true);
+            String json = "{\"fields\":{\"status\":{\"stringValue\":\"done\"},\"printedAt\":{\"integerValue\":\"" + System.currentTimeMillis() + "\"}}}";            byte[] out = json.getBytes("UTF-8");
+            c.getOutputStream().write(out);
+            c.getResponseCode();
+        } catch (Exception ignored) {} finally { if (c != null) c.disconnect(); }
+    }
+
+    // ---------- bluetooth thermal write (paired printer chosen in the POS app) ----------
+    private android.bluetooth.BluetoothSocket pjSock;
+    private java.io.OutputStream pjOut;
+
+    private boolean printerWrite(String text) {
+        String addr = getSharedPreferences("iw_pos_prefs", MODE_PRIVATE).getString("printer_addr", null);
+        if (addr == null) return false;
+        if (Build.VERSION.SDK_INT >= 31 &&
+                checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) return false;
+        try {
+            boolean alive = pjSock != null && pjSock.isConnected() && pjSock != null && pjOut != null;
+            if (!alive) {
+                closePrinter();
+                android.bluetooth.BluetoothAdapter ad = android.bluetooth.BluetoothAdapter.getDefaultAdapter();
+                if (ad == null || !ad.isEnabled()) return false;
+                android.bluetooth.BluetoothDevice dev = ad.getRemoteDevice(addr);
+                try { ad.cancelDiscovery(); } catch (Exception ignored) {}
+                pjSock = dev.createRfcommSocketToServiceRecord(java.util.UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"));
+                pjSock.connect();
+                pjOut = pjSock.getOutputStream();
+            }
+            pjOut.write(text.getBytes("ISO-8859-1"));
+            pjOut.flush();
+            return true;
+        } catch (Exception e) { closePrinter(); return false; }
+    }
+
+    private void closePrinter() {
+        try { if (pjOut != null) pjOut.close(); } catch (Exception ignored) {}
+        try { if (pjSock != null) pjSock.close(); } catch (Exception ignored) {}
+        pjSock = null; pjOut = null;
+    }
+
+    private void quietNotify(String msg) {
+        try {
+            Notification.Builder b = builderFor(CH_SVC)
+                    .setSmallIcon(android.R.drawable.stat_notify_sync)
+                    .setContentTitle(msg)
+                    .setAutoCancel(true)
+                    .setPriority(Notification.PRIORITY_LOW);
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            nm.notify((int) (System.currentTimeMillis() % 100000), b.build());
+        } catch (Exception ignored) {}
     }
 
     private static String hhmmss(long t){ return t<=0?"—":new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date(t)); }

@@ -23,6 +23,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Remote print queue → the restaurant phone prints these on its Bluetooth printer
+    match /induswok_print_jobs/{jobId} {
+      allow read, write: if true;
+    }
+
     // "Call waiter / request bill" pings from the table QR page
     match /induswok_table_requests/{reqId} {
       allow read, write: if true;

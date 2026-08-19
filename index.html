@@ -6,7 +6,7 @@
 <title>Indus Wok — Restaurant POS</title>
 <link rel="icon" type="image/png" href="favicon.png">
 <meta name="theme-color" content="#b91327">
-<meta name="app-version" content="14.0.9">
+<meta name="app-version" content="15.1.1">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -964,7 +964,7 @@
           <div class="field"><label>Phone</label><input id="setPhone"></div>
           <div class="field"><label>Address Line 1</label><input id="setAddr1"></div>
           <div class="field"><label>Address Line 2</label><input id="setAddr2"></div>
-          <div class="row"><div class="grow field"><label>GSTIN (optional)</label><input id="setGst"></div><div class="grow field"><label>UPI ID</label><input id="setUpi" placeholder="Q496128216@ybl"></div></div>
+          <div class="row"><div class="grow field"><label>GSTIN (optional)</label><input id="setGst"></div><div class="grow field"><label>UPI ID</label><input id="setUpi" placeholder="Q781941663@ybl"></div></div>
           <div class="field" style="background:#fff6f4;border:1px solid var(--line);border-radius:10px;padding:10px">
             <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:0"><input type="checkbox" id="setGstEnabled" style="width:auto" onchange="toggleGstFields()"> Charge GST on bills (turn ON only if you bill GST)</label>
             <div id="gstRates" class="row" style="margin-top:8px"><div class="grow field" style="margin:0"><label>CGST %</label><input id="setCgst" type="number" step="0.01"></div><div class="grow field" style="margin:0"><label>SGST %</label><input id="setSgst" type="number" step="0.01"></div></div>
@@ -1109,7 +1109,7 @@ const LS='induswok_pos_v1';
 // not a security boundary; protect Firestore and rotate this value before use.
 const DEV_SECRET_PIN='8746';
 const MENU_VERSION=3; // kept for legacy data; no longer triggers any auto-replace
-const APP_VERSION='14.0.9'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
+const APP_VERSION='15.1.1'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
 // v14: hardcoded defaults of the OLD Firebase project — scrubbed from saved data so
 // upgraded devices can't silently reconnect to the retired database.
 const OLD_FB_DEFAULTS={firebaseApiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM',firebaseProjectId:'induswokpos',firebaseAppId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec'};
@@ -1254,7 +1254,7 @@ function load(){
     }
     if(!d._meta)d._meta={settingsAt:0,menuAt:0,usersAt:0};
     if(!d.settings.phone || d.settings.phone.includes('98765') || d.settings.phone.includes('8850231477')) d.settings.phone='8850241377';
-    if(!d.settings.upi || d.settings.upi.includes('induswok@upi')) d.settings.upi='Q496128216@ybl';
+    if(!d.settings.upi || d.settings.upi.includes('induswok@upi') || d.settings.upi==='Q781941663@ybl') d.settings.upi='Q781941663@ybl'; // PhonePe smart-speaker VPA — bill QRs announce on it
     if(d.settings.autoTableQrKitchen===undefined)d.settings.autoTableQrKitchen=true;
     ensurePrintSettings(d.settings);
     ensurePartnerUser(d);
@@ -1449,7 +1449,7 @@ a("Sizzlers","","Chinese Mixed Grill",450,0,"nonveg");
   const _recipesDummy=[
   ];
   return {
-    settings:{name:'Indus Wok',tagline:'Asian · Chinese · Pan-Asian Kitchen',phone:'8850241377',addr1:'',addr2:'',gst:'',upi:'Q496128216@ybl',thanks:'Thank you! Visit again 🥢',gstEnabled:false,cgst:2.5,sgst:2.5,roll:58,font:11,autoPrint:true,billRoll:58,billFont:11,billAutoPrint:true,kotRoll:58,kotFont:11,kotAutoPrint:true,rawbtBill:true,rawbtKot:true,rawbtChars:32,rawbtQR:true,rawbtCut:true,voiceAnnounce:true,autoTableQrKitchen:true,rbac:{Manager:{disc:true,void:true,menu:true,rep:true},Cashier:{disc:true,void:false,menu:false,rep:false},Waiter:{disc:false,void:false,menu:false,rep:false},Partner:{disc:false,void:false,menu:false,rep:true}},syncUrl:'',licenseUrl:'',aiProv:'gemini',aiKey:'',firebaseApiKey:'',firebaseProjectId:'',firebaseAppId:'',firebaseDocPath:'pos/induswok-default'},
+    settings:{name:'Indus Wok',tagline:'Asian · Chinese · Pan-Asian Kitchen',phone:'8850241377',addr1:'',addr2:'',gst:'',upi:'Q781941663@ybl',thanks:'Thank you! Visit again 🥢',gstEnabled:false,cgst:2.5,sgst:2.5,roll:58,font:11,autoPrint:true,billRoll:58,billFont:11,billAutoPrint:true,kotRoll:58,kotFont:11,kotAutoPrint:true,rawbtBill:true,rawbtKot:true,rawbtChars:32,rawbtQR:true,rawbtCut:true,voiceAnnounce:true,autoTableQrKitchen:true,rbac:{Manager:{disc:true,void:true,menu:true,rep:true},Cashier:{disc:true,void:false,menu:false,rep:false},Waiter:{disc:false,void:false,menu:false,rep:false},Partner:{disc:false,void:false,menu:false,rep:true}},syncUrl:'',licenseUrl:'',aiProv:'gemini',aiKey:'',firebaseApiKey:'',firebaseProjectId:'',firebaseAppId:'',firebaseDocPath:'pos/induswok-default'},
     users:[{name:'Owner',pin:'1111',role:'Owner'},{name:'Cashier',pin:'2222',role:'Cashier'},{name:'Waiter',pin:'3333',role:'Waiter'},{name:'Partner',pin:'4444',role:'Partner'},{name:'Developer',pin:DEV_SECRET_PIN,role:'Developer',hidden:true}],
     menuVersion:MENU_VERSION,
     menu,tables,bills:[],expenses:[],inventory,vendors,recipes,vendorTxns:[],deductions:[],staff:[],attendance:[],sessions:[],payments:[],customers:[],kots:[],archivedBills:[],
@@ -1965,8 +1965,9 @@ function renderPrintStation(){
             <div class="row" style="align-items:center;justify-content:space-between;margin-bottom:4px"><b style="font-size:15px;color:var(--red-d)">${escHTML(label)}</b><span style="font-size:11px;padding:2px 7px;background:#f3efe9;border-radius:99px">${escHTML(orderType)}</span></div>
             <div class="row" style="justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:4px"><span>${pendingCancel?'Cancellation pending':count+' items'}</span><span>${new Date(c.mtime||Date.now()).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</span></div>
             <div style="font-size:12px;color:#555;max-height:80px;overflow:auto;margin-bottom:4px;padding-bottom:4px;border-bottom:1px dashed var(--line)">${itemHtml}</div>
-            <div class="row" style="align-items:center;justify-content:space-between;margin-top:4px"><span style="font-size:14px;font-weight:700">Total: ${money(totals.total)}</span><div class="row" style="gap:6px"><button class="btn-ghost" data-action="kot" style="padding:4px 8px;font-size:11px">🍳 KOT</button><button class="btn-primary" data-action="bill" style="padding:4px 8px;font-size:11px">🧾 Bill</button><button class="btn-ghost" data-action="wa" style="padding:4px 8px;font-size:11px">💬 WA Pay</button><button class="btn-warn" data-action="settle" style="padding:4px 8px;font-size:11px">✅ Settle</button></div></div>`;
+            <div class="row" style="align-items:center;justify-content:space-between;margin-top:4px"><span style="font-size:14px;font-weight:700">Total: ${money(totals.total)}</span><div class="row" style="gap:6px"><button class="btn-ghost" data-action="kot" style="padding:4px 8px;font-size:11px">🍳 KOT</button>`+(canRemotePrint()&&typeof c!=='undefined'&&c?`<button class="btn-ghost" data-action="remote" style="padding:4px 8px;font-size:11px;border-color:#7a52d1;color:#7a52d1" title="Print this KOT on the restaurant's Bluetooth printer — from anywhere">🏠 Remote KOT</button>`:'')+`<button class="btn-primary" data-action="bill" style="padding:4px 8px;font-size:11px">🧾 Bill</button><button class="btn-ghost" data-action="wa" style="padding:4px 8px;font-size:11px">💬 WA Pay</button><button class="btn-warn" data-action="settle" style="padding:4px 8px;font-size:11px">✅ Settle</button></div></div>`;
           card.querySelector('[data-action="kot"]').onclick=()=>printStationKOT(key);
+          const _rb=card.querySelector('[data-action="remote"]'); if(_rb)_rb.onclick=()=>remoteKotToRestaurant(key);
           card.querySelector('[data-action="bill"]').onclick=()=>printStationBill(key);
           card.querySelector('[data-action="wa"]').onclick=()=>whatsAppCartBill(key);
           card.querySelector('[data-action="settle"]').onclick=()=>printStationSettle(key);
@@ -2002,6 +2003,28 @@ function renderPrintStation(){
   // The main sync snapshot is intentionally bounded. The shard is the durable
   // source for recently settled bills, so fill it in when available.
   refreshRecentShardedBills();
+}
+/* ---------- v15 REMOTE PRINT — owner/manager/developer can print a KOT on the
+   restaurant phone's Bluetooth printer from anywhere (queued in Firestore; the
+   always-on service watches induswok_print_jobs and prints within ~20s) ---------- */
+function canRemotePrint(){ return !!(CUR && (CUR.role==='Owner'||CUR.role==='Developer'||CUR.role==='Manager')); }
+async function remoteKotToRestaurant(key){
+  if(!canRemotePrint()){ toast('Owner/Manager/Developer only'); return; }
+  const c=DB.carts[key]; if(c)normalizeCartObj(c);
+  if(!c||!(c.items||[]).length){ toast('Cart empty'); return; }
+  if(!initFirebase()){ toast('Sync not configured on this device'); return; }
+  const label=tableNoFor(key);
+  const b={no:'R'+Date.now().toString().slice(-4), date:todayStr(), time:nowTime(),
+    type:'REMOTE KOT', table:label, items:JSON.parse(JSON.stringify(c.items||[])),
+    cust:c.cust||'', by:(CUR&&CUR.name||'Owner')+' (remote)'};
+  const text=(buildRawbtText(b,true)||'').replace(/₹/g,'Rs.');
+  try{
+    await _firestoreDB.collection('induswok_print_jobs').doc(uid('pj')).set({
+      kind:'kot', table:label, by:b.by, text:text, status:'new',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(), createdAtMs: Date.now()
+    });
+    toast('🏠➡️🖨️ KOT queued — prints on the restaurant phone within ~20 seconds');
+  }catch(e){ toast('⚠️ Queued failed: '+e.message); }
 }
 function printStationKOT(key) {
   const c = DB.carts[key];
@@ -2654,6 +2677,7 @@ function buildReceiptHTML(bill,isKOT){
     <tr><td>Mode</td><td class="r">${escHTML(bill.mode)}</td></tr></table>
     <hr>
     ${upiQR}
+    ${(!isKOT && s.upi) ? `<div class="c" style="margin:6px auto 2px;text-align:center"><div class="b" style="margin-bottom:3px">Scan &amp; Pay (UPI)</div><img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&amp;qzone=1&amp;ecc=L&amp;data=${encodeURIComponent('upi://pay?pa='+encodeURIComponent(s.upi)+'&pn='+encodeURIComponent(s.name||'Indus Wok')+'&am='+Math.round((bill.totals?bill.totals.total:bill.total)||0)+'&cu=INR&tn='+encodeURIComponent('Bill '+bill.no))}" alt="UPI QR" style="width:${Math.min(32,Math.max(20,Math.round(w*0.45)))}mm;image-rendering:pixelated" onerror="this.style.display='none'"><div style="font-size:${Math.max(8,f-3)}px;margin-top:2px">${escHTML(s.upi)}</div></div>` : ''}
     <div class="c" style="margin-top:6px">${escHTML(s.thanks||'Thank you!')}</div>
     <div class="c" style="font-size:10px;margin-top:4px">Billed by ${escHTML(bill.by)}</div>
     <br><br>
@@ -2898,7 +2922,7 @@ function makeBillObj(no){
     mode:$('#payMode').value,phone:$('#custPhone').value,cust:$('#custName').value,addr:$('#custAddr').value,by:CUR.name,deviceId:DEVICE_ID,deviceName:(CUR&&CUR.name)||DEVICE_ID,ts:Date.now()};
 }
 function upiPayLink(amount, note){
-  const upi=(DB.settings&&DB.settings.upi)||'Q496128216@ybl';
+  const upi=(DB.settings&&DB.settings.upi)||'Q781941663@ybl';
   const name=(DB.settings&&DB.settings.name)||'Indus Wok';
   return `upi://pay?pa=${encodeURIComponent(upi)}&pn=${encodeURIComponent(name)}&am=${encodeURIComponent(Math.round(+amount||0))}&cu=INR&tn=${encodeURIComponent(note||'Indus Wok Bill')}`;
 }
@@ -2921,7 +2945,7 @@ function billWhatsAppText(b){
   lines.push('Pay with any UPI app from mobile:');
   lines.push(pay);
   lines.push('');
-  lines.push('UPI ID: '+((DB.settings&&DB.settings.upi)||'Q496128216@ybl'));
+  lines.push('UPI ID: '+((DB.settings&&DB.settings.upi)||'Q781941663@ybl'));
   lines.push((DB.settings&&DB.settings.thanks)||'Thank you!');
   return lines.join('\n');
 }
