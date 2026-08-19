@@ -6,7 +6,7 @@
 <title>Indus Wok — Restaurant POS</title>
 <link rel="icon" type="image/png" href="favicon.png">
 <meta name="theme-color" content="#b91327">
-<meta name="app-version" content="14.0.8">
+<meta name="app-version" content="14.0.9">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1109,7 +1109,7 @@ const LS='induswok_pos_v1';
 // not a security boundary; protect Firestore and rotate this value before use.
 const DEV_SECRET_PIN='8746';
 const MENU_VERSION=3; // kept for legacy data; no longer triggers any auto-replace
-const APP_VERSION='14.0.8'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
+const APP_VERSION='14.0.9'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
 // v14: hardcoded defaults of the OLD Firebase project — scrubbed from saved data so
 // upgraded devices can't silently reconnect to the retired database.
 const OLD_FB_DEFAULTS={firebaseApiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM',firebaseProjectId:'induswokpos',firebaseAppId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec'};
@@ -3933,10 +3933,10 @@ function renderStaff(){
     tb.innerHTML+=`<tr><td>${s.name}</td><td>${s.role}</td><td>${money(s.salary)}</td><td>${att?'✅ In '+att.in:`<button class="btn-ghost" onclick="checkIn('${s.id}')">Check In</button>`}</td></tr>`;});
   if(!DB.staff.length)tb.innerHTML='<tr><td colspan="4" class="muted">No staff.</td></tr>';
 }
-function checkIn(id){DB.attendance.push({id:uid('a'),staffId:id,date:todayStr(),in:nowTime()});save();renderStaff();}
+function checkIn(id){DB.attendance.push({id:uid('a'),staffId:id,date:todayStr(),in:nowTime(),updatedAt:Date.now()});save();renderStaff();}
 
 /* ---------- PAYROLL: salary / advance / bonus / tips / deduction ---------- */
-function curMonth(){return (document.getElementById('prMonth')&&$('#prMonth').value)||new Date().toISOString().slice(0,7);}
+function curMonth(){return (document.getElementById('prMonth')&&$('#prMonth').value)||(function(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');})(new Date());}
 function payTypeHint(){
   const t=$('#payType').value;
   const hints={
@@ -3970,7 +3970,7 @@ const ADD_TYPES=['Bonus','Tip','Overtime'];      // increase net due
 const SUB_TYPES=['Advance','Deduction'];          // decrease net due
 function payrollNeedsExpense(type){return type!=='Tip'&&type!=='Deduction';}
 function renderPayroll(){
-  if(!$('#prMonth').value)$('#prMonth').value=new Date().toISOString().slice(0,7);
+  if(!$('#prMonth').value)$('#prMonth').value=_localDate(new Date()).slice(0,7);
   if(!$('#payDate').value)$('#payDate').value=todayStr();
   const month=curMonth();
   // staff dropdowns — preserve selected staff during auto-refresh/sync refresh.
@@ -4788,6 +4788,27 @@ function mergeTwoCartsSmart(mine, theirs){
 }
 
 // v14: device-local settings that never sync (printer/RawBT/AI/Firebase credentials)
+/* v14.9sync: key-based union merge that never drops rows, even without ids */
+function recordKey(x){
+  if(!x||typeof x!=='object')return null;
+  if(x.id)return 'id:'+x.id;
+  if(x.no)return 'no:'+x.no+'|'+(x.ts||x.date||'');
+  if(x.ts)return 'ts:'+x.ts+'|'+(x.bill||x.staffId||x.name||x.vendorId||x.dishId||'');
+  if(x.staffId&&x.date)return 'att:'+x.staffId+'|'+x.date+'|'+(x.in||'');
+  if(x.name)return 'nm:'+String(x.name).toLowerCase();
+  return null;
+}
+function mergeSmart(remoteArr, localArr){
+  const out=[], map={};
+  (remoteArr||[]).forEach(x=>{ const k=recordKey(x); if(k===null||map[k]){ out.push(x); return; } map[k]=x; out.push(x); });
+  (localArr||[]).forEach(x=>{
+    const k=recordKey(x);
+    if(k===null){ out.push(x); return; }
+    if(!map[k]){ map[k]=x; out.push(x); }
+    else{ const w=newerRecord(map[k],x); if(w!==map[k]){ const i=out.indexOf(map[k]); if(i>=0)out[i]=w; map[k]=w; } }
+  });
+  return out;
+}
 const LOCAL_SETTING_KEYS=['billRoll','billFont','billAutoPrint','kotRoll','kotFont','kotAutoPrint','rawbtBill','rawbtKot','rawbtChars','rawbtQR','rawbtCut','autoTableQrKitchen','voiceAnnounce','roll','font','autoPrint','firebaseApiKey','firebaseProjectId','firebaseAppId','firebaseDocPath','aiKey','aiProv','syncUrl','licenseUrl'];
 function applyRemote(j,opts){
   opts=opts||{};
@@ -4812,6 +4833,9 @@ function applyRemote(j,opts){
   // "vendors not saving" bug. Merging by id (like staff/payments/expenses already
   // do) preserves local additions while still accepting remote updates.
   const MERGE_BY_ID={vendors:1,vendorTxns:1,customers:1,inventory:1,staff:1,payments:1,expenses:1,tables:1}; // expanded to protect against stale wipes
+  // v14.9sync: these used to be WHOLESALE-REPLACED — an offline check-in / session /
+  // stock-deduction / recipe added on one device could vanish when it re-synced.
+  const MERGE_SMART={sessions:1,attendance:1,recipes:1,deductions:1};
   const rMeta=j._meta||{};
   const lMeta=DB._meta||(DB._meta={settingsAt:0,menuAt:0,usersAt:0});
   SYNC_KEYS.forEach(k=>{
@@ -4850,6 +4874,7 @@ function applyRemote(j,opts){
     // During normal operation we retain the offline-safe merge behaviour.
     if(initialAuthoritative)DB[k]=j[k];
     else if(MERGE_BY_ID[k] && Array.isArray(DB[k]) && Array.isArray(j[k]))DB[k]=mergeByIdKeepLocal(j[k],DB[k]);
+    else if(MERGE_SMART[k] && Array.isArray(DB[k]) && Array.isArray(j[k]))DB[k]=mergeSmart(j[k],DB[k]);
     else DB[k]=j[k];
   });
   // Bills are financial records: preserve locally-settled bills only when this
@@ -4908,7 +4933,11 @@ function applyRemote(j,opts){
     const keys=new Set([...Object.keys(remote||{}),...Object.keys(local||{})]);
     keys.forEach(k=>{
       const a=remote&&remote[k],b=local&&local[k];
-      const winner=cartTombstoneTs(a)>=cartTombstoneTs(b)?a:b;
+      let winner=cartTombstoneTs(a)>=cartTombstoneTs(b)?a:b;
+      // v14.9sync: clamp far-future guard timestamps — device clock skew must not
+      // keep a kill-guard alive longer than 10min, or re-opening tables breaks.
+      if(winner){ let wt=cartTombstoneTs(winner); const cap=Date.now()+600000;
+        if(wt>cap){ wt=cap; if(winner!==null&&typeof winner==='object'){ winner=Object.assign({},winner,{ts:cap}); } else winner=cap; } }
       if(winner&&cartTombstoneTs(winner)>=cut)out[k]=winner;
     });
     return out;
