@@ -60,3 +60,15 @@ devices" button (which v14 now timestamps properly).
 Transactional push with server-newer abort · initial-sync gating · persisted rev ·
 sharded bills + atomic sequential bill numbers · cart tombstones · smart cart union
 merge · 700 KB auto-archive · QR inbox with alerts · printer device-locality.
+
+-----------------------
+# v14.3 (2026-08-19)
+- QR inbox listener had a hardcoded fallback to the OLD Firebase project — a boot race could silently point a whole device at the retired database. Removed; it only ever uses firebase-config.js now.
+- Full PWA: service worker (network-first, icons-only cache) + iOS meta tags → real "Install app" on Android/Windows; see APP-GUIDE.md for the APK/Play-Store route.
+
+# v14.2
+- Dashboard "Sync OFF" banner was checking the legacy Apps-Script syncUrl (dead era) — it lied while sync was live. Now reads real Firebase state.
+
+# v14.1
+- ROOT CAUSE of settings reverting while typing: a 2-second heartbeat re-rendered the Settings form from saved values, erasing in-progress edits. Fixed — form only refreshes on tab open.
+- Firebase settings fields autofill from firebase-config.js; saveFirebase/saveAi now stamp + sync properly.
