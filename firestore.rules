@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Shared POS data documents (docPath in firebase-config.js must stay under pos/)
+    match /pos/{docId} {
+      allow read, write: if resource == null
+          || request.resource.data.keys().hasOnly(['data','rev','updatedAt','device','deviceName']);
+    }
+
+    // Atomic daily bill-number counter used by the POS
+    match /induswok_counters/{docId} {
+      allow read, write: if true;
+    }
+
+    // Customer QR orders — the customer page creates/cancels, the POS reads,
+    // accepts and cleans up old ones
+    match /induswok_qr_orders/{orderId} {
+      allow read, write: if true;
+    }
+
+    // "Call waiter / request bill" pings from table QR page
+    match /induswok_table_requests/{reqId} {
+      allow read, write: if true;
+    }
+
+    // Everything else is denied
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

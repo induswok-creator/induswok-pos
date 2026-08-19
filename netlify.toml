@@ -1,0 +1,27 @@
+# Netlify configuration — Indus Wok POS (drop-in, nothing else needed)
+[build]
+  publish = "."
+
+# NEVER cache HTML/JS/manifest: the old GitHub Pages caching is what let devices
+# run different app versions and corrupt each other's data through sync.
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    X-Content-Type-Options = "nosniff"
+
+[[headers]]
+  for = "/firebase-config.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+# Icons may cache
+[[headers]]
+  for = "/icon-*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"

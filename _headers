@@ -1,0 +1,13 @@
+# Belt-and-suspenders duplicate of netlify.toml (Netlify reads either one).
+/*.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  X-Content-Type-Options: nosniff
+
+/firebase-config.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/manifest.webmanifest
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/icon-*.png
+  Cache-Control: public, max-age=604800

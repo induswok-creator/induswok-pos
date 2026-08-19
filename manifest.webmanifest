@@ -1,0 +1,16 @@
+{
+  "name": "Indus Wok — Restaurant POS",
+  "short_name": "IndusWok POS",
+  "description": "Billing, KOT, tables, reports & multi-device sync for Indus Wok.",
+  "id": "./index.html",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fbf6ee",
+  "theme_color": "#b91327",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Indus Wok — Migrate Data (from 1 Aug)</title>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<style>
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:#fbf6ee;color:#241f1d;margin:0;padding:18px}
+  .card{background:#fff;border:1px solid #ecdfc9;border-radius:14px;padding:18px;max-width:640px;margin:0 auto 14px;box-shadow:0 6px 18px rgba(126,12,26,.10)}
+  h1{font-size:20px;margin:0 0 4px;color:#b91327}
+  h2{font-size:15px;margin:0 0 8px}
+  button{font-family:inherit;border:none;border-radius:10px;padding:12px 16px;font-size:14px;background:#b91327;color:#fff;font-weight:700;cursor:pointer;width:100%}
+  button:disabled{background:#ccc}
+  button.sec{background:#fff;color:#b91327;border:1px solid #b91327}
+  input[type=file]{width:100%;padding:10px;border:1px dashed #b91327;border-radius:10px;background:#fff}
+  input[type=date]{padding:8px;border:1px solid #ecdfc9;border-radius:8px;font-size:14px}
+  label.chk{display:flex;gap:8px;align-items:center;font-size:14px;padding:6px 0}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #ecdfc9}
+  th{color:#8a8a8a;font-size:11px;text-transform:uppercase}
+  .muted{color:#8a8a8a;font-size:12px}
+  #log{background:#241f1d;color:#e8e0d5;font-family:monospace;font-size:12px;border-radius:10px;padding:10px;max-height:220px;overflow:auto;white-space:pre-wrap}
+  .ok{color:#1c9c4a;font-weight:700}.err{color:#b91327;font-weight:700}
+  ol{padding-left:20px;font-size:14px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🥢 One-time Data Migration</h1>
+  <div class="muted">Moves records <b>from 1 Aug onwards</b> into the NEW Firebase (<span id="proj"></span>). Menu, tables, settings, staff &amp; QR carts are <b>not</b> touched — you set those up fresh. Run this ONCE, from any device, <b>after</b> the new cloud was initialized (Step 4 of the guide).</div>
+</div>
+
+<div class="card">
+  <h2>Step 1 — Get the data source</h2>
+  <ol>
+    <li>On your <b>main billing device</b>, open the OLD app → <b>Settings → ⬇️ Export Backup (.json)</b> — this file contains everything, including the archived bills.</li>
+    <li>Pick that file here:</li>
+  </ol>
+  <input type="file" id="backupFile" accept=".json,application/json">
+  <label class="chk"><input type="checkbox" id="useOldCloud" checked> Also merge whatever is still in the OLD Firebase cloud (extra safety net)</label>
+  <label class="chk">Cutoff date: <input type="date" id="cutoff" value="2026-08-01"></label>
+</div>
+
+<div class="card">
+  <h2>Step 2 — Preview</h2>
+  <div id="preview" class="muted">Choose the backup file above…</div>
+  <table id="counts" style="display:none"><thead><tr><th>Collection</th><th>Records ≥ cutoff</th></tr></thead><tbody></tbody></table>
+</div>
+
+<div class="card">
+  <h2>Step 3 — Write to the new database</h2>
+  <button id="goBtn" disabled>🚀 Migrate into NEW Firebase</button>
+  <div class="muted" style="margin-top:6px">Records already present in the new database are never duplicated (deduped by id / bill no). Safe to re-run.</div>
+</div>
+
+<div class="card">
+  <h2>Log</h2>
+  <div id="log">—</div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const log=(m,cls)=>{ const el=$('#log'); if(el.textContent==='—')el.textContent=''; el.textContent+= (cls==='err'?'✗ ':'✓ ')+m+'\n'; el.scrollTop=el.scrollHeight; };
+
+// ---------- NEW Firebase (from firebase-config.js) ----------
+const NEW_CFG = window.IW_FIREBASE_CONFIG||{};
+$('#proj').textContent = NEW_CFG.projectId||'(not configured!)';
+let NEW_DB=null;
+if(NEW_CFG.apiKey && NEW_CFG.projectId){
+  try{ firebase.initializeApp({apiKey:NEW_CFG.apiKey, projectId:NEW_CFG.projectId, appId:NEW_CFG.appId||undefined}); NEW_DB=firebase.firestore(); }
+  catch(e){ console.warn(e); }
+}
+const NEW_DOC = NEW_CFG.docPath || 'pos/induswok-default';
+
+// ---------- OLD Firebase (optional cloud source) ----------
+const OLD_CFG = { apiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM', projectId:'induswokpos', appId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec' };
+async function readOldCloud(){
+  try{
+    let app; try{ app = firebase.app('oldApp'); }catch(e){ app = firebase.initializeApp(OLD_CFG,'oldApp'); }
+    const db = app.firestore();
+    const doc = await db.doc('pos/induswok-default').get();
+    if(!doc.exists){ log('Old cloud doc not found (fine — backup file is enough)'); return {}; }
+    return JSON.parse((doc.data()||{}).data||'{}');
+  }catch(e){ log('Old cloud read failed: '+e.message+' (fine — backup file is enough)','err'); return {}; }
+}
+
+// ---------- collection rules: field → how to read its date ----------
+const CUTOFF_DEFAULT='2026-08-01';
+const COLLECTIONS = [
+  { key:'bills',     label:'Bills (live + archived)', on:true,  dateOf: r => r.date || (r.ts? localDate(new Date(r.ts)) : '') },
+  { key:'expenses',  label:'Expenses',                on:true,  dateOf: r => r.ts ? localDate(new Date(r.ts)) : (r.date||'') },
+  { key:'payments',  label:'Staff payroll payments',  on:true,  dateOf: r => r.ts ? localDate(new Date(r.ts)) : (r.date||'') },
+  { key:'vendorTxns',label:'Vendor purchases/payments',on:false, dateOf: r => r.ts ? localDate(new Date(r.ts)) : (r.date||'') },
+  { key:'attendance',label:'Attendance',              on:false, dateOf: r => r.date || '' },
+  { key:'sessions',  label:'Day In/Out sessions',     on:true,  dateOf: r => r.date || '' },
+  { key:'deductions',label:'Inventory deductions',    on:false, dateOf: r => r.ts ? localDate(new Date(r.ts)) : '' },
+  { key:'customers', label:'Customers (ALL — tiny, used for auto-fill)', on:true, dateOf: () => '9999' }
+];
+function localDate(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function recKey(r){ return r.id ? 'id:'+r.id : (r.no ? 'no:'+r.no+'|'+(r.ts||r.date||'') : (r.ts?'ts:'+r.ts+'|'+(r.bill||r.name||''):JSON.stringify(r).slice(0,80))); }
+
+let PREPARED=null;
+
+async function prepare(){
+  const f=$('#backupFile').files[0];
+  $('#goBtn').disabled=true; PREPARED=null;
+  const cut=$('#cutoff').value||CUTOFF_DEFAULT;
+  $('#preview').innerHTML='Reading sources…';
+  let src={};
+  if(f){
+    try{ src=JSON.parse(await f.text()); log('Backup file loaded: '+f.name); }
+    catch(e){ $('#preview').innerHTML='<span class="err">That file is not valid JSON</span>'; log('Backup parse failed: '+e.message,'err'); return; }
+  }
+  if($('#useOldCloud').checked){
+    log('Reading OLD Firebase cloud…');
+    const c=await readOldCloud();
+    // merge cloud into src (dedupe by key, cloud loses on conflict — backup file is newer)
+    COLLECTIONS.forEach(col=>{
+      const a=src[col.key]||[], b=c[col.key]||[];
+      if(!b.length)return;
+      const seen=new Set(a.map(recKey));
+      b.forEach(r=>{ if(!seen.has(recKey(r))) a.push(r); });
+      src[col.key]=a;
+    });
+    if((c.archivedBills||[]).length){
+      const cve=new Set((src.archivedBills||[]).map(recKey));
+      c.archivedBills.forEach(b=>{ if(!cve.has(recKey(b))) (src.archivedBills=src.archivedBills||[]).push(b); });
+    }
+    log('Old cloud merged into source');
+  }
+  if(!f && !$('#useOldCloud').checked){ $('#preview').innerHTML='<span class="err">Pick a backup file or enable the old-cloud option.</span>'; return; }
+  // fold archived bills into bills (they're recent history; the POS auto-archive will manage size)
+  const allBills=[...(src.bills||[]),...(src.archivedBills||[])];
+  const seen=new Set(); const uniqBills=allBills.filter(b=>{const k=recKey(b); if(seen.has(k))return false; seen.add(k); return true;});
+  const out={};
+  const counts=[];
+  COLLECTIONS.forEach(col=>{
+    const arr=(col.key==='bills')?uniqBills:(src[col.key]||[]);
+    const filtered=arr.filter(r=>{ const d=col.dateOf(r)||''; return d>=cut; });
+    out[col.key]=filtered;
+    counts.push([col.label, filtered.length, arr.length]);
+  });
+  PREPARED=out;
+  const tb=$('#counts'); tb.style.display='table';
+  tb.querySelector('tbody').innerHTML=counts.map(c=>'<tr><td>'+c[0]+'</td><td><b>'+c[1]+'</b> <span class="muted">/ '+c[2]+' total found</span></td></tr>').join('');
+  const total=counts.reduce((a,c)=>a+c[1],0);
+  $('#preview').innerHTML= total? ('Ready to migrate <b>'+total+'</b> records dated <b>'+cut+'</b> or later.') : '<span class="err">Nothing found on/after '+cut+'. Check the backup file &amp; cutoff date.</span>';
+  $('#goBtn').disabled=!total;
+  log('Preview ready: '+total+' records ≥ '+cut);
+}
+
+async function migrate(){
+  if(!PREPARED)return;
+  if(!NEW_DB){ alert('firebase-config.js is not configured'); return; }
+  $('#goBtn').disabled=true;
+  log('Connecting to NEW database ('+NEW_DOC+')…');
+  const ref=NEW_DB.doc(NEW_DOC);
+  try{
+    let summary='';
+    await NEW_DB.runTransaction(async tx=>{
+      const doc=await tx.get(ref);
+      let j={}, rev=0;
+      if(doc.exists){ const d=doc.data()||{}; try{ j=JSON.parse(d.data||'{}'); }catch(e){} rev=d.rev||0; }
+      Object.keys(PREPARED).forEach(k=>{
+        if(!Array.isArray(j[k]))j[k]=[];
+        const seen=new Set(j[k].map(recKey));
+        let added=0;
+        PREPARED[k].forEach(r=>{ const kk=recKey(r); if(!seen.has(kk)){ seen.add(kk); j[k].push(r); added++; } });
+        summary+=k+': +'+added+'\n';
+      });
+      tx.set(ref,{ data: JSON.stringify(j), rev: rev+1,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        device:'migration-page', deviceName:'Aug-1 data migration' });
+    });
+    log('WROTE to new database:\n'+summary+'\nNow open the POS on your device and tap the ☁️ badge once — the data will pull in.');
+    $('#goBtn').textContent='✅ Migration complete';
+  }catch(e){
+    log('Write failed: '+e.message,'err');
+    $('#goBtn').disabled=false;
+  }
+}
+
+$('#backupFile').addEventListener('change',prepare);
+$('#useOldCloud').addEventListener('change',prepare);
+$('#cutoff').addEventListener('change',prepare);
+$('#goBtn').addEventListener('click',migrate);
+</script>
+</body>
+</html>

@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Indus Wok – Order Online</title>
+<meta name="theme-color" content="#b91327">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<!-- v14: shared config with the POS — edit firebase-config.js once -->
+<script src="firebase-config.js"></script>
+<style>
+:root{--red:#b91327;--red2:#7e0c1a;--gold:#c79a3a;--bg:#fdf7ef;--card:#fff;--ink:#1e1a19;--muted:#7a7270;--line:#ecdcc3;--green:#138a4a}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{margin:0;font-family:'Inter',system-ui,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+header{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid var(--line);padding:12px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 2px 10px rgba(0,0,0,.04)}
+header .logo{font-size:26px}header .t{font-weight:800;font-size:17px;color:var(--red)}header .s{font-size:11px;color:var(--muted)}
+.wrap{max-width:720px;margin:0 auto;padding:12px 12px 110px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:0 4px 18px rgba(126,12,26,.06);margin-bottom:12px}
+.search{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:12px;font-size:15px;background:#fff}
+.cats{display:flex;gap:8px;overflow:auto;padding:6px 0 10px;scrollbar-width:none}
+.cats::-webkit-scrollbar{display:none}
+.cat{white-space:nowrap;padding:7px 14px;border-radius:999px;border:1px solid var(--line);background:#fff;font-weight:600;font-size:13px;cursor:pointer}
+.cat.on{background:var(--red);color:#fff;border-color:var(--red)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(min-width:560px){.grid{grid-template-columns:1fr 1fr 1fr}}
+.item{border:1px solid var(--line);border-radius:14px;background:#fff;padding:10px;display:flex;flex-direction:column;gap:6px;min-height:122px}
+.item .n{font-weight:700;font-size:14px;line-height:1.25}
+.item .d{font-size:11px;color:var(--muted)}
+.item .p{color:var(--red);font-weight:800}
+.item .v{font-size:10px}
+.vdot{display:inline-block;width:10px;height:10px;border-radius:2px;border:1px solid #888;vertical-align:middle;margin-right:4px;position:relative}
+.vdot.v{border-color:var(--green)} .vdot.v:after{content:'';position:absolute;inset:2px;background:var(--green);border-radius:50%}
+.vdot.n{border-color:#c00} .vdot.n:after{content:'';position:absolute;inset:2px;background:#c00;border-radius:50%}
+.add{margin-top:auto;background:var(--red);color:#fff;border:none;border-radius:10px;padding:8px;font-weight:700;cursor:pointer}
+.add:active{transform:scale(.97)}
+.cartbar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);box-shadow:0 -6px 24px rgba(0,0,0,.08);padding:10px 12px;z-index:30}
+.cartbar .inner{max-width:720px;margin:0 auto;display:flex;align-items:center;gap:10px}
+.cartbtn{flex:1;background:var(--red);color:#fff;border:none;border-radius:12px;padding:14px 16px;font-weight:800;font-size:15px;display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+.badge{background:rgba(255,255,255,.22);padding:3px 9px;border-radius:999px;font-size:12px}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-end;justify-content:center;z-index:40}
+.sheet.open{display:flex}
+.sheet .panel{background:#fff;width:100%;max-width:720px;border-radius:20px 20px 0 0;max-height:88vh;overflow:auto;padding:16px 14px 22px;animation:up .22s ease}
+@keyframes up{from{transform:translateY(40px);opacity:.5}to{transform:translateY(0);opacity:1}}
+.row{display:flex;gap:10px;flex-wrap:wrap}.grow{flex:1;min-width:120px}
+label{font-size:12px;font-weight:700;color:#444;display:block;margin-bottom:4px}
+input,select,textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:11px;font-size:15px;font-family:inherit;background:#fff}
+textarea{min-height:68px;resize:vertical}
+.cartline{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px dashed var(--line);font-size:14px}
+.qtybtn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:4px 9px;font-weight:800;cursor:pointer}
+.tot{display:flex;justify-content:space-between;font-weight:800;font-size:17px;padding-top:10px}
+.partners{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
+.partner{border:2px solid var(--line);border-radius:12px;padding:10px;text-align:center;cursor:pointer;background:#fff;font-size:13px;font-weight:600}
+.partner.on{border-color:var(--red);background:#fff4f4}
+.partner small{display:block;color:var(--muted);font-weight:500;font-size:11px}
+.paybtn{width:100%;background:var(--green);color:#fff;border:none;border-radius:13px;padding:15px;font-weight:800;font-size:16px;cursor:pointer;margin-top:12px}
+.paybtn:disabled{opacity:.6}
+.muted{color:var(--muted);font-size:12px}
+.pill{display:inline-block;background:#fff0f0;color:var(--red);padding:3px 8px;border-radius:999px;font-size:11px;font-weight:700}
+.hint{background:#fff8e3;border:1px solid #f3d58a;color:#7a5a00;padding:10px;border-radius:12px;font-size:12px;line-height:1.45;margin-bottom:10px}
+.success{text-align:center;padding:26px}
+.success h2{color:var(--green);margin:8px 0}
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chip{padding:5px 10px;background:#f6efe3;border-radius:999px;font-size:12px}
+a.btnlink{display:block;text-align:center;margin-top:8px;padding:12px;border-radius:12px;border:1px solid var(--line);text-decoration:none;color:var(--ink);font-weight:700;background:#fff}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🥢</div>
+  <div>
+    <div class="t">Indus Wok</div>
+    <div class="s" id="tableLabel">Scan & Order • Mumbai</div>
+  </div>
+  <div style="margin-left:auto;text-align:right">
+    <div class="pill" id="liveBadge">● LIVE MENU</div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="card" style="background:linear-gradient(135deg,#fff7f0,#fff);">
+    <div id="heroTitle" style="font-weight:800;font-size:16px">Order from your phone 📱</div>
+    <div id="heroSub" class="muted">Add to cart → checkout → choose Rapido / Porter / Dunzo → we cook instantly</div>
+    <div class="chips" style="margin-top:8px">
+      <span class="chip">⏱️ 25–35 min</span>
+      <span class="chip">💵 Pay on delivery / UPI</span>
+      <span class="chip">🚚 Free packaging</span>
+    </div>
+  </div>
+
+  <div id="tablePrevOrder" class="card" style="display:none;border-color:#bfe6cd;background:#f7fff9"></div>
+  <div id="tableServiceBox" class="card" style="display:none">
+    <b>Need help at your table?</b>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px">
+      <button class="add" style="background:#7a52d1" onclick="sendTableRequest('waiter')">🛎️ Waiter</button>
+      <button class="add" style="background:#138a4a" onclick="sendTableRequest('water')">💧 Water</button>
+      <button class="add" style="background:#c79a3a" onclick="sendTableRequest('bill')">🧾 Bill</button>
+    </div>
+    <div id="tablePayBox" style="display:none;margin-top:10px"></div>
+  </div>
+
+  <input id="q" class="search" placeholder="🔍 Search Hakka Noodles, Manchurian…">
+  <div class="cats" id="cats"></div>
+  <div class="grid" id="menu"></div>
+  <div id="empty" class="muted" style="text-align:center;padding:30px;display:none">No items found</div>
+</div>
+
+<div class="cartbar" id="cartbar" style="display:none">
+  <div class="inner">
+    <button class="cartbtn" onclick="openCart()">
+      <span><span id="cartCount" class="badge">0 items</span> View cart</span>
+      <span id="cartTotal">₹0</span>
+    </button>
+  </div>
+</div>
+
+<!-- CART SHEET -->
+<div class="sheet" id="cartSheet" onclick="if(event.target===this)closeCart()">
+  <div class="panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <h3 style="margin:0">🛒 Your Cart</h3>
+      <button onclick="closeCart()" style="border:none;background:#f3e8d8;border-radius:9px;padding:6px 10px;cursor:pointer">✕</button>
+    </div>
+    <div id="cartList"></div>
+    <div class="tot"><span>Subtotal</span><span id="sSub">₹0</span></div>
+    <div style="display:flex;justify-content:space-between;color:#555;font-size:13px"><span>GST (5%)</span><span id="sGst">₹0</span></div>
+    <div class="tot" style="border-top:2px solid #eee;margin-top:6px"><span>Total</span><span id="sTot">₹0</span></div>
+
+    <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
+      <h3 id="detailsTitle" style="margin:0 0 8px">👤 Delivery details</h3>
+      <div class="row">
+        <div class="grow"><label>Your Name *</label><input id="cName" placeholder="Full name"></div>
+        <div class="grow"><label>Phone (WhatsApp) *</label><input id="cPhone" placeholder="+91 …" inputmode="tel"></div>
+      </div>
+      <div id="addrWrap" style="margin-top:8px"><label id="addrLabel">Delivery Address *</label><textarea id="cAddr" placeholder="Flat / Building, Street, Landmark, Area, Mumbai"></textarea></div>
+      <div style="margin-top:8px"><label>Order Note (optional)</label><input id="cNote" placeholder="Less spicy, no onion, etc."></div>
+    </div>
+
+    <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
+      <h3 id="partnerTitle" style="margin:0 0 6px">🚚 Choose delivery partner</h3>
+      <div class="hint" id="partnerHint">We prepare food in 15–20 min. You book the rider from your phone after placing the order – links open automatically. Or choose Self Pickup.</div>
+      <div class="partners" id="partners">
+        <div class="partner on" data-p="Self Pickup"><b>🚶 Self Pickup</b><small>Collect from counter</small></div>
+        <div class="partner" data-p="Rapido Bike"><b>🛵 Rapido</b><small>Bike – 10-20 min</small></div>
+        <div class="partner" data-p="Porter"><b>📦 Porter</b><small>2-wheeler / 3-wheeler</small></div>
+        <div class="partner" data-p="Dunzo"><b>⚡ Dunzo</b><small>Instant – Mumbai</small></div>
+        <div class="partner" data-p="Swiggy Genie"><b>🟢 Swiggy Genie</b><small>Anything delivered</small></div>
+        <div class="partner" data-p="Borzo"><b>🚚 Borzo</b><small>Same-day express</small></div>
+      </div>
+      <input type="hidden" id="deliveryPartner" value="Self Pickup">
+    </div>
+
+    <button id="placeBtn" class="paybtn" onclick="placeOrder()">✅ Place Order – <span id="payTotal">₹0</span></button>
+    <div class="muted" style="text-align:center;margin-top:8px">By placing order you agree to prep start immediately. COD / UPI at pickup.</div>
+  </div>
+</div>
+
+<!-- ITEM CUSTOMIZATION SHEET -->
+<div class="sheet" id="modSheet">
+  <div class="panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;border-bottom:1px solid var(--line);padding-bottom:8px">
+      <h3 id="modItemTitle" style="margin:0;font-size:16px;color:var(--red)">Item Name</h3>
+      <button onclick="closeModSheet()" style="border:none;background:#f3e8d8;border-radius:9px;padding:6px 10px;cursor:pointer">✕</button>
+    </div>
+    <div style="text-align:left">
+      <label style="font-size:13px;color:#111;margin-bottom:6px">🌶️ Select Spice Level</label>
+      <select id="modSpice" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;font-size:14px;background:#fff">
+        <option value="Normal 🌶️">Normal 🌶️</option>
+        <option value="Less Spicy 🌶️">Less Spicy 🌶️</option>
+        <option value="Extra Spicy 🌶️🌶️">Extra Spicy 🌶️🌶️</option>
+        <option value="Jain (No Onion/Garlic) 🚫🧅">Jain (No Onion/Garlic) 🚫🧅</option>
+      </select>
+
+      <label style="font-size:13px;color:#111;margin:12px 0 6px;display:block">➕ Choice of Add-ons</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <label style="display:flex;align-items:center;gap:8px;background:#f9f5ee;padding:10px;border-radius:10px;margin:0;cursor:pointer;font-weight:600">
+          <input type="checkbox" class="mod-addon" data-name="Fried Egg" data-price="30"> 🍳 Fried Egg (+₹30)
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;background:#f9f5ee;padding:10px;border-radius:10px;margin:0;cursor:pointer;font-weight:600">
+          <input type="checkbox" class="mod-addon" data-name="Extra Gravy" data-price="40"> 🍜 Extra Gravy (+₹40)
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;background:#f9f5ee;padding:10px;border-radius:10px;margin:0;cursor:pointer;font-weight:600">
+          <input type="checkbox" class="mod-addon" data-name="Extra Sauce" data-price="20"> 🥢 Extra Sauce (+₹20)
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;background:#f9f5ee;padding:10px;border-radius:10px;margin:0;cursor:pointer;font-weight:600">
+          <input type="checkbox" class="mod-addon" data-name="Burnt Garlic" data-price="25"> 🧄 Burnt Garlic (+₹25)
+        </label>
+      </div>
+
+      <label style="font-size:13px;color:#111;margin-bottom:6px;display:block">📝 Special Instructions</label>
+      <input id="modNote" placeholder="e.g. Make it dry, extra crispy, less oil..." style="width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;font-size:14px">
+
+      <button class="paybtn" style="margin-top:16px;background:var(--red);width:100%" onclick="confirmAddMod()">➕ Add to Cart</button>
+    </div>
+  </div>
+</div>
+
+<!-- SUCCESS SHEET -->
+<div class="sheet" id="doneSheet">
+  <div class="panel">
+    <div class="success">
+      <div style="font-size:44px">✅</div>
+      <h2>Order sent to Indus Wok!</h2>
+      <div id="doneId" style="font-weight:800;color:var(--red)"></div>
+      <p class="muted" id="doneMsg">Kitchen is notified. You’ll get a WhatsApp confirmation.</p>
+      <div id="upiInstantPayContainer" style="margin-top:12px"></div>
+      <div id="orderActionBox" style="margin-top:8px"></div>
+      <div id="riderCard" class="card" style="text-align:left;margin-top:12px">
+        <b>Next steps – book your rider:</b>
+        <div id="riderLinks" style="margin-top:8px;display:grid;gap:8px"></div>
+      </div>
+      <button class="paybtn" style="background:var(--red)" onclick="location.reload()">🍜 Order again</button>
+      <div class="muted" style="margin-top:10px">Order ID saved • Show this screen at pickup</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------- Firebase ----------
+const IW_CFG = (typeof window!=='undefined' && window.IW_FIREBASE_CONFIG) || {};
+const firebaseConfig = {
+  apiKey: IW_CFG.apiKey || "",
+  authDomain: (IW_CFG.projectId || "") + ".firebaseapp.com",
+  projectId: IW_CFG.projectId || "",
+  appId: IW_CFG.appId || ""
+};
+const POS_DOC = IW_CFG.docPath || 'pos/induswok-default';
+let fdb = null;
+if(firebaseConfig.apiKey && firebaseConfig.projectId){
+  try{ firebase.initializeApp(firebaseConfig); fdb = firebase.firestore(); }catch(e){ console.warn('Firebase init failed', e); }
+}else{ console.warn('Firebase not configured — deploy firebase-config.js with the project config'); }
+
+// ---------- Restaurant ----------
+const RESTAURANT = {
+  name: "Indus Wok",
+  phone: "+91 8850241377",
+  address: "Indus Wok, Andheri West, Mumbai, Maharashtra",
+  upi: "Q496128216@ybl",
+  lat: 19.1363, lng: 72.8296
+};
+
+// ---------- Menu (fallback + live) ----------
+let MENU = [
+  {id:'m1',name:'Veg Hakka Noodles',cat:'Rice & Noodles',price:189,veg:'veg'},
+  {id:'m2',name:'Chicken Hakka Noodles',cat:'Rice & Noodles',price:249,veg:'nonveg'},
+  {id:'m3',name:'Paneer Chilli Dry',cat:'Starters',price:259,veg:'veg'},
+  {id:'m4',name:'Chicken Manchurian',cat:'Starters',price:289,veg:'nonveg'},
+  {id:'m5',name:'Veg Fried Rice',cat:'Rice & Noodles',price:179,veg:'veg'},
+  {id:'m6',name:'Schezwan Chicken Rice',cat:'Rice & Noodles',price:269,veg:'nonveg'},
+  {id:'m7',name:'Veg Manchow Soup',cat:'Soups',price:149,veg:'veg'},
+  {id:'m8',name:'Hot & Sour Chicken Soup',cat:'Soups',price:179,veg:'nonveg'},
+  {id:'m9',name:'Paneer 65',cat:'Starters',price:269,veg:'veg'},
+  {id:'m10',name:'Chilli Chicken',cat:'Starters',price:299,veg:'nonveg'},
+  {id:'m11',name:'Veg Spring Roll',cat:'Starters',price:199,veg:'veg'},
+  {id:'m12',name:'Dragon Chicken',cat:'Main Course',price:349,veg:'nonveg'}
+];
+
+// try load live menu from Firestore POS doc
+async function loadLiveMenu(){
+  try{
+    fdb.doc(POS_DOC).onSnapshot(doc => {
+      if(doc && doc.exists){
+        const raw = doc.data().data;
+        if(raw){
+          try{
+            const j = JSON.parse(raw);
+            if(j.menu && j.menu.length>3){
+              MENU = j.menu.map(m=>({id:m.id, name:m.name, cat:m.cat||'Other', sub:m.sub||'', price: m.full||m.price||199, half:+m.half||0, veg: (m.veg||'veg').includes('non')?'nonveg':'veg', outOfStock: !!m.outOfStock, qrHalf: (m.qrHalf===undefined?undefined:!!m.qrHalf)}));
+              document.getElementById('liveBadge').textContent='● LIVE MENU';
+              document.getElementById('liveBadge').style.background='#e8fff1';
+              document.getElementById('liveBadge').style.color='#138a4a';
+              buildCats(); renderMenu();
+            }
+          }catch(_){}
+        }
+      }
+    });
+    const doc = await fdb.doc(POS_DOC).get();
+    if(doc.exists){
+      const raw = doc.data().data;
+      if(raw){
+        const j = JSON.parse(raw);
+        if(j.menu && j.menu.length>3){
+          MENU = j.menu.map(m=>({id:m.id, name:m.name, cat:m.cat||'Other', sub:m.sub||'', price: m.full||m.price||199, half:+m.half||0, veg: (m.veg||'veg').includes('non')?'nonveg':'veg', outOfStock: !!m.outOfStock, qrHalf: (m.qrHalf===undefined?undefined:!!m.qrHalf)}));
+          document.getElementById('liveBadge').textContent='● LIVE MENU';
+          document.getElementById('liveBadge').style.background='#e8fff1';
+          document.getElementById('liveBadge').style.color='#138a4a';
+        }
+      }
+    }
+  }catch(e){ console.log('live menu fallback', e.message); }
+  buildCats(); renderMenu();
+}
+
+// ---------- UI ----------
+let cart = [];
+let currentCat = 'All';
+const urlParams = new URLSearchParams(location.search);
+const tableParam = urlParams.get('table') || urlParams.get('id') || '';
+const tableIdParam = urlParams.get('tid') || urlParams.get('tableId') || '';
+const tableNoParam = urlParams.get('no') || '';
+const tableAreaParam = urlParams.get('area') || '';
+const srcParam = (urlParams.get('src') || '').toLowerCase();
+const isTableQr = !!(tableIdParam || tableNoParam || srcParam.includes('qr_table') || srcParam.includes('qr_dinein'));
+if(tableParam){ document.getElementById('tableLabel').textContent = (isTableQr ? 'Dine-in: ' : 'Table: ') + decodeURIComponent(tableParam) + ' • Mumbai'; }
+function setupOrderMode(){
+  if(!isTableQr) return;
+  const label = decodeURIComponent(tableParam || (tableNoParam ? ('Table '+tableNoParam) : 'Your Table'));
+  const set=(id,txt)=>{ const el=document.getElementById(id); if(el) el.textContent=txt; };
+  set('heroTitle','Order for '+label+' 📱');
+  set('heroSub','Add items → place order → it appears instantly in the restaurant table cart.');
+  set('detailsTitle','👤 Your details');
+  set('addrLabel','Table / Seat Note (optional)');
+  const addr=document.getElementById('cAddr'); if(addr){ addr.placeholder='Optional: seat note, e.g. corner chair / birthday table'; addr.value=label; }
+  set('partnerTitle','🍽️ Dine-in order');
+  set('partnerHint','No delivery address needed. Your order goes directly to this table in POS, kitchen and print station.');
+  const dp=document.getElementById('deliveryPartner'); if(dp) dp.value='Dine-in Table';
+  const partners=document.getElementById('partners'); if(partners) partners.innerHTML='<div class="partner on" data-p="Dine-in Table" style="grid-column:1/-1"><b>🪑 Serve at '+label+'</b><small>Synced live to restaurant POS</small></div>';
+  const svc=document.getElementById('tableServiceBox'); if(svc) svc.style.display='block';
+}
+
+function buildCats(){
+  const cats = ['All', ...new Set(MENU.map(m=>m.cat))];
+  document.getElementById('cats').innerHTML = cats.map(c=>`<div class="cat ${c===currentCat?'on':''}" onclick="pickCat('${c.replace(/'/g,"\\'")}')">${c}</div>`).join('');
+}
+function pickCat(c){ currentCat=c; buildCats(); renderMenu(); }
+document.getElementById('q').addEventListener('input', renderMenu);
+
+function renderMenu(){
+  const q = (document.getElementById('q').value||'').toLowerCase();
+  let list = MENU.filter(m=> (currentCat==='All'||m.cat===currentCat) && (!q || m.name.toLowerCase().includes(q)));
+  document.getElementById('empty').style.display = list.length? 'none':'block';
+  document.getElementById('menu').innerHTML = list.map(m=>`
+    <div class="item" style="${m.outOfStock ? 'opacity:0.55;background:#fdfdfd' : ''}">
+      <div class="n"><span class="vdot ${m.veg}"></span>${m.name} ${m.outOfStock ? '<span style="color:#d93025;font-size:11px;font-weight:bold;padding:2px 6px;background:#fce8e6;border-radius:4px;margin-left:6px">🚫 SOLD OUT</span>' : ''}</div>
+      <div class="d">${m.cat}</div>
+      <div class="p">₹${m.price}</div>
+      ${m.outOfStock ? '<button class="add" style="background:#ccc;cursor:not-allowed;color:#666" disabled>Sold Out</button>' : itemButtonsHTML(m)}
+    </div>`).join('');
+}
+function canHalf(m){
+  const txt=((m.cat||'')+' '+(m.sub||'')+' '+(m.name||'')).toLowerCase();
+  if(!(+m.half>0)) return false;
+  if(m.qrHalf===true) return true;
+  if(m.qrHalf===false) return false;
+  if(/soup|starter|starters|appetizer|dry|gravy|combo|meal/.test(txt)) return false;
+  return /rice|noodle|noodles/.test(txt);
+}
+function itemButtonsHTML(m){
+  if(canHalf(m)){
+    return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:auto">
+      <button class="add" style="font-size:12px;padding:7px" onclick='addToCart("${m.id}","full")'>Full ₹${m.price}</button>
+      <button class="add" style="font-size:12px;padding:7px;background:#7e0c1a" onclick='addToCart("${m.id}","half")'>Half ₹${m.half}</button>
+      <button class="add" style="grid-column:1/-1;padding:6px 10px;font-size:13px;background:#c79a3a" onclick='openModSheet("${m.id}","full")'>⚙️ Full Options</button>
+      <button class="add" style="grid-column:1/-1;padding:6px 10px;font-size:13px;background:#8b6a28" onclick='openModSheet("${m.id}","half")'>⚙️ Half Options</button>
+    </div>`;
+  }
+  return `<div style="display:flex;gap:4px"><button class="add" style="padding:6px 10px;font-size:13px" onclick='openModSheet("${m.id}","full")'>⚙️ Options</button><button class="add" onclick='addToCart("${m.id}","full")'>+ Add</button></div>`;
+}
+let pendingModItem = null;
+let pendingModSize = "full";
+function openModSheet(id,size){
+  const m = MENU.find(x=>x.id===id); if(!m) return;
+  if(m.outOfStock){ alert('Sorry, this item is currently sold out!'); return; }
+  pendingModItem = m; pendingModSize = (size==='half' && canHalf(m)) ? 'half' : 'full';
+  const shownPrice = pendingModSize==='half' ? m.half : m.price;
+  document.getElementById('modItemTitle').textContent = m.name + (pendingModSize==='half'?' (Half)':' (Full)') + ' (₹' + shownPrice + ')';
+  document.getElementById('modSpice').value = 'Normal 🌶️';
+  document.querySelectorAll('.mod-addon').forEach(cb => cb.checked = false);
+  document.getElementById('modNote').value = '';
+  document.getElementById('modSheet').classList.add('open');
+}
+function closeModSheet(){ document.getElementById('modSheet').classList.remove('open'); }
+function confirmAddMod(){
+  if(!pendingModItem) return;
+  const m = pendingModItem;
+  const spice = document.getElementById('modSpice').value;
+  let addons = [];
+  let addonPrice = 0;
+  document.querySelectorAll('.mod-addon:checked').forEach(cb => {
+    addons.push(cb.getAttribute('data-name'));
+    addonPrice += parseInt(cb.getAttribute('data-price')||0);
+  });
+  const note = document.getElementById('modNote').value.trim();
+  let modsList = [];
+  if(spice && spice !== 'Normal 🌶️') modsList.push(spice);
+  if(addons.length) modsList = modsList.concat(addons);
+  
+  const basePrice = pendingModSize==='half' ? m.half : m.price;
+  const finalPrice = basePrice + addonPrice;
+  const modKey = pendingModSize + '::' + modsList.join('|') + '::' + note;
+  const f = cart.find(c => c.id === m.id && (c.modKey||'') === modKey);
+  if(f) {
+    f.qty++;
+  } else {
+    cart.push({ id: m.id, name: m.name + (pendingModSize==='half' ? ' (Half)' : '') + (addons.length ? ' (+'+addons.join(', ')+')' : ''), price: finalPrice, qty: 1, size: pendingModSize, mods: modsList, note: note, modKey: modKey });
+  }
+  closeModSheet();
+  updateCartBar();
+  navigator.vibrate && navigator.vibrate(12);
+}
+function addToCart(id,size){
+  const m = MENU.find(x=>x.id===id); if(!m || m.outOfStock) return;
+  const sz = (size==='half' && canHalf(m)) ? 'half' : 'full';
+  const price = sz==='half' ? m.half : m.price;
+  const f = cart.find(c=>c.id===id && !c.modKey && (c.size||'full')===sz);
+  if(f) f.qty++; else cart.push({id:m.id,name:m.name+(sz==='half'?' (Half)':''),price:price,qty:1,size:sz,mods:[],note:''});
+  updateCartBar();
+  navigator.vibrate && navigator.vibrate(12);
+}
+function updateCartBar(){
+  const n = cart.reduce((s,i)=>s+i.qty,0);
+  const t = cart.reduce((s,i)=>s+i.price*i.qty,0);
+  document.getElementById('cartCount').textContent = n + (n===1?' item':' items');
+  document.getElementById('cartTotal').textContent = '₹'+t;
+  document.getElementById('cartbar').style.display = n? 'block':'none';
+}
+function openCart(){
+  if(!cart.length) return;
+  renderCartList();
+  document.getElementById('cartSheet').classList.add('open');
+}
+function closeCart(){ document.getElementById('cartSheet').classList.remove('open'); }
+function renderCartList(){
+  const list = document.getElementById('cartList');
+  if(!cart.length){ list.innerHTML='<div class="muted">Cart empty</div>'; return; }
+  list.innerHTML = cart.map((it,idx)=>`
+    <div class="cartline">
+      <div><b>${it.name}</b><br><span class="muted">₹${it.price}</span></div>
+      <div>
+        <button class="qtybtn" onclick="chg(${idx},-1)">−</button>
+        <span style="padding:0 8px;font-weight:700">${it.qty}</span>
+        <button class="qtybtn" onclick="chg(${idx},1)">+</button>
+      </div>
+    </div>`).join('');
+  const sub = cart.reduce((s,i)=>s+i.price*i.qty,0);
+  const gst = Math.round(sub*0.05);
+  const tot = sub+gst;
+  document.getElementById('sSub').textContent='₹'+sub;
+  document.getElementById('sGst').textContent='₹'+gst;
+  document.getElementById('sTot').textContent='₹'+tot;
+  document.getElementById('payTotal').textContent='₹'+tot;
+}
+function chg(i,d){ cart[i].qty+=d; if(cart[i].qty<=0) cart.splice(i,1); renderCartList(); updateCartBar(); if(!cart.length) closeCart(); }
+
+// delivery partner select
+function bindPartnerClicks(){
+  document.querySelectorAll('.partner').forEach(p=>{
+    p.addEventListener('click', ()=>{
+      document.querySelectorAll('.partner').forEach(x=>x.classList.remove('on'));
+      p.classList.add('on');
+      document.getElementById('deliveryPartner').value = p.dataset.p;
+    });
+  });
+}
+bindPartnerClicks();
+setupOrderMode();
+bindPartnerClicks();
+
+
+function renderTablePrevOrder(c){
+  const box=document.getElementById('tablePrevOrder'); if(!box) return;
+  if(!isTableQr || !c || !Array.isArray(c.items) || !c.items.length){ box.style.display='none'; return; }
+  const sub=c.items.reduce((a,i)=>a+(+i.price||0)*(+i.qty||1),0);
+  box.style.display='block';
+  box.innerHTML=`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b style="color:var(--green)">🧾 Already ordered for this table</b><span class="pill" style="background:#e8fff1;color:#138a4a">₹${Math.round(sub)}</span></div>
+    <div class="muted" style="margin-top:4px">This is the previous/current table order. Your new selections below will be added separately.</div>
+    <div style="margin-top:8px;border-top:1px dashed var(--line);padding-top:6px">${c.items.map(i=>`<div style="font-size:13px;margin:3px 0"><b>${i.qty||1}× ${i.name||'Item'}</b> <span class="muted">₹${i.price||0}</span>${(i.mods&&i.mods.length)?`<br><span class="muted">${i.mods.join(', ')}</span>`:''}</div>`).join('')}</div>
+    <div style="margin-top:8px;font-weight:800;color:var(--red)">Add more items from menu below ↓</div>`;
+  const pay=document.getElementById('tablePayBox');
+  if(pay){ const upi=`upi://pay?pa=${encodeURIComponent(RESTAURANT.upi)}&pn=${encodeURIComponent(RESTAURANT.name)}&am=${Math.round(sub)}&cu=INR&tn=${encodeURIComponent('Table '+(tableParam||tableNoParam)+' Bill')}`; pay.innerHTML=`<a class="paybtn" style="display:block;text-decoration:none;text-align:center;background:#138a4a;color:#fff" href="${upi}">⚡ Pay current bill ₹${Math.round(sub)} by UPI</a><div class="muted" style="text-align:center;margin-top:4px">Works with GPay / PhonePe / Paytm on mobile</div>`; }
+}
+
+async function sendTableRequest(type){
+  if(!isTableQr){ alert('This works only from table QR'); return; }
+  const label=decodeURIComponent(tableParam || (tableNoParam?('Table '+tableNoParam):'Table'));
+  const req={id:'REQ'+Date.now(), type, table:label, tableId:tableIdParam, tableNo:tableNoParam, tableArea:tableAreaParam, status:'new', resolved:false, source:'table_qr', createdAt: firebase.firestore.FieldValue.serverTimestamp(), createdAtMs:Date.now()};
+  try{ await fdb.collection('induswok_table_requests').doc(req.id).set(req); }catch(e){ console.log(e.message); }
+  if(type==='bill'){ const pay=document.getElementById('tablePayBox'); if(pay) pay.style.display='block'; }
+  alert(type==='bill'?'Bill requested. Staff will come/send bill shortly.':'Request sent to staff ✅');
+}
+window.sendTableRequest=sendTableRequest;
+
+function startTableCartWatcher(){
+  if(!isTableQr) return;
+  try{
+    fdb.doc(POS_DOC).onSnapshot(doc=>{
+      if(!doc || !doc.exists) return;
+      const raw=(doc.data()||{}).data; if(!raw) return;
+      let j=null; try{j=JSON.parse(raw);}catch(e){return;}
+      const carts=j.carts||{}; let c=null;
+      if(tableIdParam && carts[tableIdParam]) c=carts[tableIdParam];
+      if(!c && tableNoParam){
+        Object.keys(carts).some(k=>{const x=carts[k]; if(String(x.tableNo||'')===String(tableNoParam) && (!tableAreaParam || String(x.tableArea||'')===String(tableAreaParam))){c=x; return true;} return false;});
+      }
+      renderTablePrevOrder(c);
+    });
+  }catch(e){console.log('table cart watcher',e.message);}
+}
+startTableCartWatcher();
+
+// ---------- PLACE ORDER ----------
+async function placeOrder(){
+  const name = document.getElementById('cName').value.trim();
+  const phone = document.getElementById('cPhone').value.trim();
+  const addr = document.getElementById('cAddr').value.trim();
+  if(!name || !phone || (!isTableQr && !addr)){ alert(isTableQr ? 'Please fill Name and Phone' : 'Please fill Name, Phone and Address'); return; }
+  if(cart.length===0){ alert('Cart empty'); return; }
+  const dupKey='iw_last_order_'+(tableIdParam||tableParam||'online');
+  const dupPayload=JSON.stringify(cart.map(i=>[i.id,i.qty,i.price,i.size||'full',i.modKey||'']));
+  try{ const last=JSON.parse(localStorage.getItem(dupKey)||'null'); if(last && last.payload===dupPayload && Date.now()-last.ts<60000){ alert('This order was already sent recently. Please wait or add a new item.'); return; } localStorage.setItem(dupKey, JSON.stringify({payload:dupPayload,ts:Date.now()})); }catch(e){}
+  const btn = document.getElementById('placeBtn'); btn.disabled=true; btn.textContent='⏳ Sending…';
+  const sub = cart.reduce((s,i)=>s+i.price*i.qty,0);
+  const gst = Math.round(sub*0.05);
+  const total = sub+gst;
+  const order = {
+    id: 'IW' + Date.now().toString().slice(-7),
+    customerName: name,
+    customerPhone: phone,
+    customerAddress: isTableQr ? (addr || decodeURIComponent(tableParam||'')) : addr,
+    note: document.getElementById('cNote').value.trim(),
+    table: tableParam ? decodeURIComponent(tableParam) : 'QR-Order',
+    tableId: tableIdParam,
+    tableNo: tableNoParam,
+    tableArea: tableAreaParam,
+    orderType: isTableQr ? 'dinein' : 'online',
+    items: cart.map(c=>({id:c.id||'', name:c.name, qty:c.qty, price:c.price, size:c.size||'full', mods:c.mods||[], note:c.note||''})),
+    subtotal: sub, gst, total,
+    deliveryPartner: isTableQr ? 'Dine-in Table' : document.getElementById('deliveryPartner').value,
+    status: 'new',
+    source: isTableQr ? 'qr_table' : 'qr_customer',
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    createdAtMs: Date.now()
+  };
+  if(!fdb){ alert('Online ordering is not configured yet — please call the restaurant to order.'); return; }
+  try{
+    // write to Firestore
+    await fdb.collection('induswok_qr_orders').doc(order.id).set(order);
+    // also local backup
+    try{ const arr = JSON.parse(localStorage.getItem('iw_my_orders')||'[]'); arr.unshift({...order, createdAt: new Date().toISOString()}); localStorage.setItem('iw_my_orders', JSON.stringify(arr.slice(0,20))); }catch(e){}
+    showSuccess(order);
+  }catch(e){
+    alert('Order failed: '+e.message + '\nSaved locally – staff will see it when online.');
+    showSuccess(order);
+  }
+  btn.disabled=false; btn.innerHTML='✅ Place Order – <span id="payTotal">₹'+total+'</span>';
+}
+
+function startLiveOrderStatus(orderId){
+  try{
+    fdb.collection('induswok_qr_orders').doc(orderId).onSnapshot(doc => {
+      if(doc && doc.exists){
+        const st = doc.data().status || 'new';
+        const doneIdEl = document.getElementById('doneId');
+        if(doneIdEl){
+          let stText = '⏳ Received by Kitchen';
+          let stColor = '#e08a00';
+          if(st === 'accepted' || st === 'preparing'){ stText = '🍳 Cooking in Wok Now'; stColor = '#7a52d1'; }
+          else if(st === 'rejected' || st === 'cancelled'){ stText = '❌ Cancelled'; stColor = '#b91327'; }
+          else if(st === 'ready'){ stText = '📦 Ready for Delivery / Pickup!'; stColor = '#1c9c4a'; }
+          else if(st === 'delivered'){ stText = '✔️ Completed / Delivered'; stColor = '#444'; }
+          else if(st === 'rejected'){ stText = '❌ Order Rejected by Kitchen'; stColor = '#dc2626'; }
+          doneIdEl.innerHTML = `Order #${orderId} <span style="display:block;font-size:15px;margin-top:6px;padding:6px 12px;background:${stColor}18;color:${stColor};border-radius:10px;font-weight:800">${stText}</span>`;
+          const act=document.getElementById('orderActionBox'); if(act){ act.innerHTML = st==='new' ? `<button class="paybtn" style="background:#b91327" onclick="cancelMyOrder('${orderId}')">❌ Cancel before kitchen accepts</button>` : ''; }
+        }
+      }
+    });
+  }catch(e){}
+}
+
+
+async function cancelMyOrder(orderId){
+  if(!confirm('Cancel this order?')) return;
+  try{ await fdb.collection('induswok_qr_orders').doc(orderId).set({status:'cancelled', updatedAt: firebase.firestore.FieldValue.serverTimestamp()}, {merge:true}); alert('Order cancelled'); }catch(e){ alert('Could not cancel: '+e.message); }
+}
+window.cancelMyOrder=cancelMyOrder;
+
+function showSuccess(o){
+  closeCart();
+  document.getElementById('doneId').textContent = 'Order #' + o.id;
+  document.getElementById('doneMsg').textContent = `Hi ${o.customerName}! Total ₹${o.total}. Kitchen notified.`;
+  const upiUrl = `upi://pay?pa=${RESTAURANT.upi}&pn=${encodeURIComponent(RESTAURANT.name)}&am=${o.total}&tr=${o.id}&cu=INR&tn=${encodeURIComponent('Indus Wok QR Order '+o.id)}`;
+  const upiContainer = document.getElementById('upiInstantPayContainer');
+  if(upiContainer){
+    upiContainer.innerHTML = `
+      <a href="${upiUrl}" class="paybtn" style="background:#138a4a;color:#fff;display:block;text-decoration:none;font-weight:800;padding:14px;border-radius:12px;margin-bottom:12px;box-shadow:0 4px 12px rgba(19,138,74,0.3)">⚡ Instant Pay ₹${o.total} via UPI (GPay / PhonePe / Paytm) →</a>
+    `;
+  }
+  startLiveOrderStatus(o.id);
+  // rider booking links
+  const pickup = encodeURIComponent(RESTAURANT.address);
+  const drop = encodeURIComponent(o.customerAddress);
+  const links = [
+    {n:'🛵 Book Rapido',u:`https://www.rapido.bike/`},
+    {n:'📦 Book Porter',u:`https://porter.in/`},
+    {n:'⚡ Open Dunzo',u:`https://www.dunzo.com/`},
+    {n:'🟢 Swiggy Genie',u:`https://www.swiggy.com/genie`},
+    {n:'🚚 Borzo Delivery',u:`https://borzodelivery.com/`},
+    {n:'💬 WhatsApp Restaurant',u:`https://wa.me/91${RESTAURANT.phone.replace(/\D/g,'').slice(-10)}?text=${encodeURIComponent('Hi Indus Wok, my QR order '+o.id+' is placed. Name: '+o.customerName)}`}
+  ];
+  document.getElementById('riderLinks').innerHTML = links.map(l=>`<a class="btnlink" target="_blank" href="${l.u}">${l.n} →</a>`).join('');
+  if(isTableQr){ const rc=document.getElementById('riderCard'); if(rc) rc.style.display='none'; }
+  document.getElementById('doneSheet').classList.add('open');
+  // auto whatsapp to restaurant
+  setTimeout(()=>{
+    const msg = encodeURIComponent(`*NEW QR ORDER ${o.id}*\n${o.customerName} • ${o.customerPhone}\n${o.customerAddress}\n${o.items.map(i=>i.name+' x'+i.qty).join(', ')}\nTotal ₹${o.total}\nDelivery: ${o.deliveryPartner}`);
+    window.open(`https://wa.me/91${RESTAURANT.phone.replace(/\D/g,'').slice(-10)}?text=${msg}`, '_blank');
+  }, 900);
+}
+
+// boot
+loadLiveMenu();
+</script>
+
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a26fe4c7eaf5c784',t:'MTc4NjAzODcyOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a270c6928e77cd03',t:'MTc4NjA0Nzk3Nw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
