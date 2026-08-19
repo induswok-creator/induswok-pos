@@ -6,7 +6,7 @@
 <title>Indus Wok — Restaurant POS</title>
 <link rel="icon" type="image/png" href="favicon.png">
 <meta name="theme-color" content="#b91327">
-<meta name="app-version" content="14.0.6">
+<meta name="app-version" content="14.0.8">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1109,7 +1109,7 @@ const LS='induswok_pos_v1';
 // not a security boundary; protect Firestore and rotate this value before use.
 const DEV_SECRET_PIN='8746';
 const MENU_VERSION=3; // kept for legacy data; no longer triggers any auto-replace
-const APP_VERSION='14.0.6'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
+const APP_VERSION='14.0.8'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
 // v14: hardcoded defaults of the OLD Firebase project — scrubbed from saved data so
 // upgraded devices can't silently reconnect to the retired database.
 const OLD_FB_DEFAULTS={firebaseApiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM',firebaseProjectId:'induswokpos',firebaseAppId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec'};
@@ -1247,6 +1247,11 @@ function load(){
     // upgraded devices stop syncing into the retired database.
     Object.keys(OLD_FB_DEFAULTS).forEach(k=>{ if(d.settings[k]===OLD_FB_DEFAULTS[k]) d.settings[k]=''; });
     if(d.settings.firebaseDocPath===undefined)d.settings.firebaseDocPath='pos/induswok-default';
+    // v14.8fix: bills-archive cutoff — bills older than this were archived ON PURPOSE
+    // (stale devices must not merge them back into the cloud)
+    if(d.billsArchiveCutoff===undefined){
+      try{ let mx=0; (d.archivedBills||[]).forEach(b=>{ const t=+((b&&(b.ts||b.updatedAt))||0)||0; if(t>mx)mx=t; }); d.billsArchiveCutoff=mx; }catch(e){ d.billsArchiveCutoff=0; }
+    }
     if(!d._meta)d._meta={settingsAt:0,menuAt:0,usersAt:0};
     if(!d.settings.phone || d.settings.phone.includes('98765') || d.settings.phone.includes('8850231477')) d.settings.phone='8850241377';
     if(!d.settings.upi || d.settings.upi.includes('induswok@upi')) d.settings.upi='Q496128216@ybl';
@@ -1313,7 +1318,14 @@ function liveRefreshAfterDataChange(src){
     }catch(e){console.warn('live refresh failed',e);}
   });
 }
-function save(){pruneEmptyCarts();markPendingWrite();persist();liveRefreshAfterDataChange('save');schedulePush();}
+function _pruneArchivedDupes(){
+  try{
+    const cut=DB.billsArchiveCutoff||0; if(!cut)return;
+    const tsOf=b=>+((b&&(b.ts||b.updatedAt))||0)||0;
+    DB.bills=(DB.bills||[]).filter(b=>{ const bt=tsOf(b); return !bt || bt>=cut; });
+  }catch(e){}
+}
+function save(){_pruneArchivedDupes();pruneEmptyCarts();markPendingWrite();persist();liveRefreshAfterDataChange('save');schedulePush();}
 function seed(){
   const menu=[];
   const a=(cat,sub,name,full,half,veg)=>menu.push({id:uid('m'),cat,sub,name,full,half:half||0,veg});
@@ -3564,6 +3576,7 @@ function archiveOldBills(keepDays, silent){
   // Move
   DB.archivedBills = toArchive.concat(DB.archivedBills||[]);
   DB.bills = (DB.bills||[]).filter(b => (b.date||'') >= cutoffStr);
+  try{ let mx=DB.billsArchiveCutoff||0; toArchive.forEach(b=>{ const t=+((b&&(b.ts||b.updatedAt))||0)||0; if(t>mx)mx=t; }); DB.billsArchiveCutoff=mx; }catch(e){}
   save();
   updateArchiveStats();
   renderReports();
@@ -4286,6 +4299,7 @@ function snapshot(){
   o.cartTombstones=DB.cartTombstones||{};
   o.menuVersion=DB.menuVersion;
   o._meta=DB._meta||{settingsAt:0,menuAt:0,usersAt:0};
+  o.billsArchiveCutoff=DB.billsArchiveCutoff||0;
   return o;
 }
 function schedulePush(){
@@ -4612,7 +4626,8 @@ function autoArchiveIfNeeded(){
     let added=0;
     allToArchive.forEach(b=>{ if(!seen.has(b.no)){ DB.archivedBills.push(b); added++; } });
     DB.bills=live.filter(b=>!allToArchive.find(x=>x.no===b.no));
-    console.log('[v13 auto-archive] moved '+added+' bills to local archive, live now '+DB.bills.length);
+    try{ let mx=DB.billsArchiveCutoff||0; allToArchive.forEach(b=>{ const t=+((b&&(b.ts||b.updatedAt))||0)||0; if(t>mx)mx=t; }); DB.billsArchiveCutoff=mx; }catch(e){}
+    console.log('[v13 auto-archive] moved '+added+' bills to local archive, live now '+DB.bills.length+' cutoff '+DB.billsArchiveCutoff);
     return added;
   }catch(e){ console.warn('auto-archive failed', e.message); return 0; }
 }
@@ -4843,6 +4858,17 @@ function applyRemote(j,opts){
   try{
     if(!initialAuthoritative)DB.bills=mergeBillsKeepBoth(DB.bills||[],localBills);
     else DB.bills=Array.isArray(j.bills)?j.bills:[];
+    // v14.8fix: an absent bill can mean ARCHIVED, not lost. A waking-up phone that
+    // still holds those bills used to merge them back and push them everywhere.
+    // billsArchiveCutoff says: everything older than this was archived on purpose.
+    const cut=Math.max(+(j&&j.billsArchiveCutoff||0)||0, DB.billsArchiveCutoff||0);
+    if(cut>0){
+      DB.billsArchiveCutoff=cut;
+      const tsOf=b=>+((b&&(b.ts||b.updatedAt))||0)||0;
+      const before=(DB.bills||[]).length;
+      DB.bills=(DB.bills||[]).filter(b=>{ const bt=tsOf(b); return !bt || bt>=cut; });
+      if(before!==DB.bills.length) console.log('[sync] dropped '+(before-DB.bills.length)+' known-archived bills from a stale snapshot');
+    }
   }catch(e){console.warn('bill merge failed',e);}
   if(!DB.users || DB.users.length < 3){ DB.users = _savedUsers.length ? _savedUsers : (typeof seed==='function'?seed().users.slice():[]); }
   // v14: menuVersion/settings handled inside the loop above; no re-push triggers.
@@ -5350,7 +5376,19 @@ function qrBeep(times=3){
     }
   }catch(e){}
 }
-window.qrTestSound = ()=>{ qrBeep(2); toast('🔊 Sound test'); };
+window.qrTestSound = ()=>{
+  // v15: inside the IndusWok app, test the REAL background alert path (service →
+  // notification + siren) and show its live status, instead of just a page beep.
+  if(window.IWNativePrint && IWNativePrint.testOrderAlert){
+    const ok = IWNativePrint.testOrderAlert();
+    let st='';
+    try{ st = IWNativePrint.alertStatus()||''; }catch(e){}
+    toast(ok ? '🔔 Test alert fired — check your notification shade' : '⚠️ alert service not running');
+    if(st) setTimeout(()=>toast('ℹ️ '+st,'warning'),1200);
+    return;
+  }
+  qrBeep(2); toast('🔊 Sound test');
+};
 
 // ---- NOTIFICATIONS ----
 async function qrEnableNotify(){

@@ -40,14 +40,20 @@ public class OrderNotifyService extends Service {
     private static final String COLLECTION = "induswok_qr_orders";
 
     private static final String CH_SVC = "iw_service";
-    private static final String CH_ORDERS = "iw_orders_v2"; // v14.9: channel settings freeze after creation — bump id to apply alarm sound/vibration
+    private static final String CH_ORDERS = "iw_orders_v3"; // Android freezes channel settings after first creation — bump id whenever sound/vibe change
     private static final int FG_ID = 4071;
     private static final long POLL_OK_MS = 20000;   // 20s
     private static final long POLL_ERR_MS = 60000;  // backoff on error
 
     public static final String ACTION_STOP_SIREN = "com.induswok.pos.STOP_SIREN";
+    public static final String ACTION_TEST_ALERT = "com.induswok.pos.TEST_ALERT";
 
-    private Handler handler;
+    // tiny on-device diagnostics (readable via the IWNativePrint bridge)
+    public static volatile String diag = "service not started yet";
+
+    private Handler handler;                 // main thread — siren timing only
+    private android.os.HandlerThread bgThread;
+    private Handler bgHandler;               // v15.2: network polling MUST run here
     private PowerManager.WakeLock wakeLock;
     private boolean running = false;
     private android.media.MediaPlayer siren;
@@ -73,8 +79,14 @@ public class OrderNotifyService extends Service {
         wakeLock.setReferenceCounted(false);
         handler = new Handler(getMainLooper());
         running = true;
+        diag = "service started " + new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date());
         prepareSiren();
-        handler.postDelayed(pollTask, 2500); // first poll shortly after start (marks baseline, no alert flood)
+        // v15.2: poll on a background thread — Handler(mainLooper) caused
+        // NetworkOnMainThreadException ("poll FAILED: null") and zero alerts.
+        bgThread = new android.os.HandlerThread("iw-poll");
+        bgThread.start();
+        bgHandler = new Handler(bgThread.getLooper());
+        bgHandler.postDelayed(pollTask, 2500); // first poll shortly after start (marks baseline, no alert flood)
     }
 
     private final Runnable pollTask = new Runnable() {
@@ -86,10 +98,11 @@ public class OrderNotifyService extends Service {
                 pollOnce();
             } catch (Exception e) {
                 Log.w("IW", "poll failed: " + e.getMessage());
+                diag = "poll FAILED: " + e.getClass().getSimpleName() + " " + String.valueOf(e.getMessage());
                 next = POLL_ERR_MS;
             } finally {
                 try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Exception ignored) {}
-                handler.postDelayed(this, next);
+                bgHandler.postDelayed(this, next);
             }
         }
     };
@@ -97,6 +110,11 @@ public class OrderNotifyService extends Service {
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP_SIREN.equals(intent.getAction())) {
             stopSiren();
+            return START_STICKY;
+        }
+        if (intent != null && ACTION_TEST_ALERT.equals(intent.getAction())) {
+            try { showOrderNotification("\ud83d\udd14 Test: new QR order", "\u2022 2 items \u2014 Rs.999 (Test Customer)", 1, 999); }
+            catch (Throwable t) { diag = "test alert failed: " + t.getMessage(); }
             return START_STICKY;
         }
         return START_STICKY; // system restarts us if killed
@@ -116,15 +134,39 @@ public class OrderNotifyService extends Service {
         } catch (Exception ignored) {}
     }
 
+    private volatile boolean sirenPlaying = false;
+
     private void startSiren() {
+        if (sirenPlaying) return;
+        boolean ok = false;
         try {
             if (siren == null) prepareSiren();
-            if (siren == null) return;
-            if (siren.isPlaying()) return;
-            siren.start();
-            sirenStopAt = System.currentTimeMillis() + 60 * 1000; // auto-quiet safety
-            handler.postDelayed(this::stopSirenIfOld, 60 * 1000);
+            if (siren != null) {
+                siren.start();
+                ok = siren.isPlaying();
+            }
         } catch (Exception e) { prepareSiren(); }
+        sirenPlaying = ok;
+        if (!ok) fallbackSiren();   // v15: guaranteed voice even if the ROM breaks MediaPlayer
+        sirenStopAt = System.currentTimeMillis() + 60 * 1000;
+        handler.postDelayed(this::stopSirenIfOld, 60 * 1000);
+    }
+
+    // Backup siren: raw alarm-stream tones — works on practically every Android build.
+    private void fallbackSiren() {
+        sirenPlaying = true;
+        new Thread(() -> {
+            android.media.ToneGenerator tg = null;
+            try {
+                tg = new android.media.ToneGenerator(android.media.AudioManager.STREAM_ALARM, 100);
+                long end = System.currentTimeMillis() + 55000;
+                while (sirenPlaying && System.currentTimeMillis() < end) {
+                    try { tg.startTone(android.media.ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 700); } catch (Throwable ignored) {}
+                    try { Thread.sleep(750); } catch (InterruptedException ignored) {}
+                }
+            } catch (Throwable ignored) {}
+            try { if (tg != null) tg.release(); } catch (Throwable ignored) {}
+        }).start();
     }
 
     private void stopSirenIfOld() {
@@ -132,6 +174,7 @@ public class OrderNotifyService extends Service {
     }
 
     private synchronized void stopSiren() {
+        sirenPlaying = false;
         try { if (siren != null) { if (siren.isPlaying()) siren.pause(); siren.seekTo(0); siren.release(); } } catch (Exception ignored) {}
         siren = null;
     }
@@ -151,6 +194,8 @@ public class OrderNotifyService extends Service {
         running = false;
         stopSiren();
         try { if (handler != null) handler.removeCallbacks(pollTask); } catch (Exception ignored) {}
+        try { if (bgHandler != null) bgHandler.removeCallbacks(pollTask); } catch (Exception ignored) {}
+        try { if (bgThread != null) bgThread.quitSafely(); } catch (Exception ignored) {}
         try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Exception ignored) {}
         super.onDestroy();
     }
@@ -165,13 +210,14 @@ public class OrderNotifyService extends Service {
         c.setRequestMethod("GET");
         int code = c.getResponseCode();
         InputStream is = code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream();
-        String body = readAll(is);
+        String body = is == null ? "" : readAll(is);
         c.disconnect();
         if (code != 200) throw new RuntimeException("firestore http " + code);
 
         JSONObject root = new JSONObject(body);
         JSONArray docs = root.optJSONArray("documents");
         long lastSeen = prefs().getLong("last_order_ms", -1);
+        if (docs != null && docs.length() == 0) diag = "poll OK, inbox empty · " + hhmmss(System.currentTimeMillis());
 
         if (docs == null || docs.length() == 0) {
             if (lastSeen < 0) prefs().edit().putLong("last_order_ms", System.currentTimeMillis()).apply();
@@ -194,26 +240,32 @@ public class OrderNotifyService extends Service {
             if (ts > lastSeen) fresh.put(f);
             newest = Math.max(newest, ts);
         }
-        if (lastSeen < 0) { prefs().edit().putLong("last_order_ms", newest).apply(); return; }
+        if (lastSeen < 0) { prefs().edit().putLong("last_order_ms", Math.min(newest, System.currentTimeMillis())).apply(); diag="baseline set "+hhmmss(Math.min(newest,System.currentTimeMillis()))+" · docs:"+docs.length(); return; }
         if (fresh.length() > 0) {
             prefs().edit().putLong("last_order_ms", newest).apply();
+            diag = "ALERT "+fresh.length()+" new · newest "+hhmmss(newest);
             alert(fresh);
         } else {
+            diag = "poll OK docs:"+docs.length()+" · marker "+hhmmss(lastSeen)+" · newest "+hhmmss(newest);
             prefs().edit().putLong("last_order_ms", Math.max(lastSeen, 0)).apply();
         }
     }
 
     private static long orderTs(JSONObject f) {
+        // v15.1: SERVER timestamp first (Firestore assigns it) — customer phones with
+        // wrong clocks used to poison the comparison marker and kill all later alerts.
+        // createdAtMs (client clock) is only a fallback, and future dates are clamped.
+        long now = System.currentTimeMillis();
         try {
-            if (f.has("createdAtMs")) return (long) f.getJSONObject("createdAtMs").getDouble("numberValue");
             JSONObject ts = f.optJSONObject("createdAt");
             if (ts != null && ts.has("timestampValue")) {
                 String s = ts.getString("timestampValue"); // e.g. 2026-08-19T01:44:46.082Z
                 java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US);
                 df.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
                 java.util.Date d = df.parse(s.substring(0, 19));
-                return d == null ? 0 : d.getTime();
+                if (d != null) return Math.min(d.getTime(), now + 120000);
             }
+            if (f.has("createdAtMs")) return Math.min((long) f.getJSONObject("createdAtMs").getDouble("numberValue"), now + 120000);
         } catch (Exception ignored) {}
         return 0;
     }
@@ -298,7 +350,10 @@ public class OrderNotifyService extends Service {
                 .setStyle(new Notification.BigTextStyle().bigText(body))
                 .setSubText("Total Rs." + (long) total + (count > 1 ? " · " + count + " orders" : ""))
                 .setContentIntent(pi)
-                .setAutoCancel(true)
+                .setAutoCancel(false)      // v15: stays in the notification panel like WhatsApp messages
+                .setOngoing(false)         // but swipe-to-dismiss works
+                .setWhen(System.currentTimeMillis())
+                .setShowWhen(true)
                 .setPriority(Notification.PRIORITY_HIGH)
                 .setDefaults(Notification.DEFAULT_LIGHTS)
                 .setSound(android.net.Uri.parse("android.resource://" + getPackageName() + "/raw/order_alarm"))
@@ -309,6 +364,8 @@ public class OrderNotifyService extends Service {
         startSiren();  // siren keeps ringing ~60s until staff opens the app
         wakeScreen();
     }
+
+    private static String hhmmss(long t){ return t<=0?"—":new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date(t)); }
 
     private static String readAll(InputStream is) throws Exception {
         StringBuilder sb = new StringBuilder();

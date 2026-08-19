@@ -200,6 +200,27 @@ public class MainActivity extends Activity {
             toastOnUi("🔔 Order alerts ON — works even when the app is closed");
             return true;
         }
+
+        /** Test: fire a demo notification + siren right now. */
+        @JavascriptInterface public boolean testOrderAlert() {
+            startOrderWatcher();
+            try {
+                Intent i = new Intent(MainActivity.this, OrderNotifyService.class);
+                i.setAction(OrderNotifyService.ACTION_TEST_ALERT);
+                startService(i);
+                return true;
+            } catch (Throwable t) { toastOnUi("service not running: " + t.getMessage()); return false; }
+        }
+
+        /** Diagnostics line for the POS help screen. */
+        @JavascriptInterface public String alertStatus() {
+            String notif;
+            if (Build.VERSION.SDK_INT >= 33) {
+                notif = (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
+                        ? "notifications: granted" : "notifications: DENIED — enable in Android settings";
+            } else notif = "notifications: pre-33 (granted)";
+            return OrderNotifyService.diag + " · " + notif;
+        }
     }
 
     private void toastOnUi(final String msg) {
