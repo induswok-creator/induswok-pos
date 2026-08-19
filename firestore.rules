@@ -4,8 +4,12 @@ service cloud.firestore {
 
     // Shared POS data documents (docPath in firebase-config.js must stay under pos/)
     match /pos/{docId} {
-      allow read, write: if resource == null
-          || request.resource.data.keys().hasOnly(['data','rev','updatedAt','device','deviceName']);
+      // reads: open (the doc path itself is the "password" — keep it unguessable);
+      // write-field validation only makes sense for writes, never reads — that's
+      // why read and write are split here.
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasOnly(['data','rev','updatedAt','device','deviceName']);
+      allow delete: if false;
     }
 
     // Atomic daily bill-number counter used by the POS
@@ -19,7 +23,7 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // "Call waiter / request bill" pings from table QR page
+    // "Call waiter / request bill" pings from the table QR page
     match /induswok_table_requests/{reqId} {
       allow read, write: if true;
     }
