@@ -1,0 +1,19 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'com.induswok.pos'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.induswok.pos'
+        minSdk 23
+        targetSdk 34
+        versionCode 1
+        versionName '14.4'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

@@ -1,0 +1,40 @@
+# ============================================================
+#  COPY THIS FILE to:  .github/workflows/android-apk.yml
+#
+#  How (2 minutes, browser only):
+#   1. github.com/induswok-creator/induswok-pos → Actions tab
+#      → "set up a workflow yourself"
+#   2. Paste this whole file → Commit changes → Filename: android-apk.yml
+#   3. Actions tab → "Build Android APK" → Run workflow (green button)
+#   4. When it finishes (~3-5 min), scroll down → Artifacts →
+#      download "induswok-pos-android" → unzip → app-debug.apk
+#
+#  After that, every push that changes android-app/** rebuilds automatically.
+# ============================================================
+name: Build Android APK
+
+on:
+  push:
+    paths:
+      - 'android-app/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build debug APK
+        run: gradle -p android-app :app:assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: induswok-pos-android
+          path: android-app/app/build/outputs/apk/debug/app-debug.apk

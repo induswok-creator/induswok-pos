@@ -1,0 +1,2 @@
+rootProject.name = 'IndusWokPOS'
+include ':app'

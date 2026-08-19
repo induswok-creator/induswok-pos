@@ -13,6 +13,25 @@ The site is now a full PWA (manifest + icons + service worker as of v14.3):
 
 Install it on every device (billing computer, cashier phone, waiter phones) once.
 
+## Option 1.5 — ⭐ IndusWok Printer App (built by GitHub, direct Bluetooth print — no RawBT)
+
+The repo now contains `android-app/` — a tiny Android shell of the POS with a **native
+Bluetooth thermal-printer bridge**. KOTs and bills print straight to your paired
+ESC/POS printer, and **QR orders auto-print their KOT** to the kitchen.
+
+Setup:
+1. On GitHub: repo → **Actions** tab → *set up a workflow yourself* → paste the
+   contents of **`APK-BUILD-WORKFLOW.yml`** (in repo root) → Commit
+2. Run the workflow once → download artifact **induswok-pos-android** → unzip →
+   install `app-debug.apk` on each Android device (allow "install unknown apps")
+3. Pair the thermal printer: Android Settings → Bluetooth → pair (PIN usually 0000/1234)
+4. Open the IndusWok app → POS **Settings → Printing** → new blue row appears:
+   **🤖 IndusWok app printer → Choose Bluetooth printer** → pick it → 🧪 Test print
+5. Done: "Print Bill"/KOT buttons and **QR-order auto-KOTs** print silently —
+   no dialog, no RawBT.
+
+(In a normal browser the app codes stay inactive — RawBT and Chrome print keep working as before.)
+
 ## Option 2 — Real APK for Android (via PWABuilder, ~10 min)
 
 If you want an installable file you can share directly (e.g. via WhatsApp) or later publish on Play Store:

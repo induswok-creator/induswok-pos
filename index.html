@@ -6,7 +6,7 @@
 <title>Indus Wok — Restaurant POS</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Crect rx=%2714%27 width=%2764%27 height=%2764%27 fill=%27%23b91327%27/%3E%3Ctext x=%2732%27 y=%2739%27 text-anchor=%27middle%27 font-size=%2730%27 font-family=%27Arial%27 fill=%27white%27%3E🥢%3C/text%3E%3C/svg%3E">
 <meta name="theme-color" content="#b91327">
-<meta name="app-version" content="14.0.3">
+<meta name="app-version" content="14.0.4">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -994,7 +994,13 @@
               <div class="row"><label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="setKotAutoPrint" style="width:auto"> Auto-send KOT to printer (skip preview)</label></div>
             </div>
             <div class="card" style="box-shadow:none;border:1px solid var(--gold);background:#fffdf6;padding:12px;margin-top:10px">
-              <h3 style="margin-bottom:6px">📲 RawBT Thermal Printing (Android)</h3>
+              <div id="nativePrintRow" class="row" style="display:none;margin:6px 0 12px;align-items:center;gap:8px;flex-wrap:wrap;background:#eef6ff;border:1px solid #cde8ff;border-radius:10px;padding:10px">
+              <b style="font-size:13px">🤖 IndusWok app printer:</b>
+              <span id="nativePrintStatus" class="muted" style="font-size:12px">—</span>
+              <button class="btn-ghost" onclick="window.IWNativePrint&&window.IWNativePrint.pickPrinter()">🖨️ Choose Bluetooth printer</button>
+              <button class="btn-ghost" onclick="window.IWNativePrint&&window.IWNativePrint.test()">🧪 Test print</button>
+            </div>
+            <h3 style="margin-bottom:6px">📲 RawBT Thermal Printing (Android)</h3>
               <p class="muted" style="font-size:11px;margin:0 0 8px;line-height:1.5">Install the free <b>RawBT</b> app from Google Play on the Android device, pair your 58mm/80mm Bluetooth or USB thermal printer in RawBT once. Then turn these on to print silently — no Chrome print dialog. The UPI <b>QR code prints as real text</b> (no image needed).</p>
               <div class="row">
                 <label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="setRawbtBill" style="width:auto"> Use RawBT for Bills</label>
@@ -1103,7 +1109,7 @@ const LS='induswok_pos_v1';
 // not a security boundary; protect Firestore and rotate this value before use.
 const DEV_SECRET_PIN='8746';
 const MENU_VERSION=3; // kept for legacy data; no longer triggers any auto-replace
-const APP_VERSION='14.0.3'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
+const APP_VERSION='14.0.4'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
 // v14: hardcoded defaults of the OLD Firebase project — scrubbed from saved data so
 // upgraded devices can't silently reconnect to the retired database.
 const OLD_FB_DEFAULTS={firebaseApiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM',firebaseProjectId:'induswokpos',firebaseAppId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec'};
@@ -1678,6 +1684,7 @@ function go(id){
   if(id==='staff')renderStaff();
   if(id==='payroll')renderPayroll();
   if(id==='settings')fillSettings();
+  if(id==='qr'){ try{ qrInitUI(); renderQrInbox(); }catch(e){} } // v14.4
 }
 
 /* ---------- INIT ---------- */
@@ -2799,6 +2806,13 @@ function sendToPrinter(kind,forceRawbt){
   const html=window.__printHTML||'';
   kind=kind||window.__printKind||'bill';
   const prof=printProfile(kind);
+  // v14.4: IndusWok Android app bridge - direct Bluetooth ESC/POS, no RawBT needed.
+  if(window.IWNativePrint && window.IWNativePrint.available && window.IWNativePrint.available() && window.__printBill){
+    try{
+      const t=(buildRawbtText(window.__printBill,kind==='kot')||'').replace(/₹/g,'Rs.');
+      if(window.IWNativePrint.print(t)){ try{closeModal&&closeModal();}catch(e){} return; }
+    }catch(e){ console.warn('native print failed - falling back',e); }
+  }
   // RawBT path: send raw ESC/POS text (with QR) to the RawBT Android app.
   if((forceRawbt||prof.rawbt) && window.__printBill){
     const ok=rawbtPrint(window.__printBill,kind);
@@ -4059,6 +4073,13 @@ function fillSettings(){
     const dn=localStorage.getItem(DEVICE_NAME_KEY)||'';
     const el=document.getElementById('setDeviceName'); if(el) el.value=dn;
     const prev=document.getElementById('deviceNamePreview'); if(prev) prev.textContent= dn ? 'Current: '+dn+' ('+DEVICE_ID+')' : 'Current ID: '+DEVICE_ID+' (no friendly name set)';
+  }catch(e){}
+  try{
+    const nr=document.getElementById('nativePrintRow');
+    if(nr){ nr.style.display=window.IWNativePrint?'flex':'none';
+      const st=document.getElementById('nativePrintStatus');
+      if(st&&window.IWNativePrint&&window.IWNativePrint.status) st.textContent=window.IWNativePrint.status()||'app bridge ready - choose a printer';
+    }
   }catch(e){}
 
 }
@@ -5668,6 +5689,7 @@ function syncQrToCartAndKot(o){
       status: 'new',
       by: 'Customer QR'
     });
+    try{ __qrAutoPrintKot(kotId); }catch(e){ console.warn('qr auto-print failed',e); } // v14.4
   }
   save();
   try{ if(typeof pushNow==='function') setTimeout(pushNow,20); }catch(e){}
@@ -5825,13 +5847,28 @@ window.saveQrSettings = function(){
 };
 
 // ---- INIT HOOKS ----
+// v14.4: physically print a QR auto-KOT - native app bridge preferred, RawBT fallback
+function __qrAutoPrintKot(kotId){
+  const k=(DB.kots||[]).find(x=>x.id===kotId); if(!k)return;
+  const bridgeOn=!!(window.IWNativePrint && window.IWNativePrint.available && window.IWNativePrint.available());
+  const rawbtOn=printProfile('kot').rawbt;
+  if(!bridgeOn && !rawbtOn) return;
+  const b={no:k.id,date:todayStr(),time:k.time,type:k.type,table:k.table,
+    items:(k.items||[]).map(i=>({name:i.name,size:i.size||'full',qty:i.qty,price:+i.price||0,mods:i.mods||[],note:i.note||'',sub:i.sub||''})),
+    cust:'',by:k.by||'Customer QR'};
+  const text=(buildRawbtText(b,true)||'').replace(/₹/g,'Rs.');
+  if(bridgeOn){ if(window.IWNativePrint.print(text)) return; }
+  if(rawbtOn) sendToRawBT(text);
+}
 function qrInitUI(){
-  // fill table select
+  // fill table select - v14.4: preserve the current selection across rebuilds
   const sel = document.getElementById('qrTableSelect');
   if(sel && typeof DB!=='undefined' && DB.tables){
+    const prev = sel.value;
     sel.innerHTML = '<option value="takeaway">🛍️ Takeaway Counter</option>' +
       DB.tables.map(t=>`<option value="${t.id}" data-no="${t.no||''}" data-area="${escHTML(t.area||'')}">${escHTML(tableDisplay(t))}</option>`).join('') +
       '<option value="delivery">🚚 Delivery QR</option><option value="main">🏪 Main Entrance</option>';
+    if(prev){ for(let i=0;i<sel.options.length;i++){ if(sel.options[i].value===prev){ sel.value=prev; break; } } }
   }
   const waEl = document.getElementById('qrOwnerWa');
   let savedWa = localStorage.getItem(OWNER_WA_KEY) || (typeof DB!=='undefined' && DB.settings ? DB.settings.phone : '') || '8850241377';
@@ -5854,12 +5891,9 @@ if(typeof _origShowPage==='function'){
     if(id==='qr'){ qrInitUI(); renderQrInbox(); }
     return r;
   };
-} else {
-  // fallback for mainprinting's openTab
-  document.addEventListener('click', e=>{
-    setTimeout(()=>{ if(document.getElementById('page-qr')?.classList.contains('active')){ qrInitUI(); renderQrInbox(); } }, 50);
-  });
 }
+// v14.4: the old global click-fallback (rebuilding the QR UI on EVERY tap) is removed —
+// it reset the table dropdown to "Takeaway" right as you touched it.
 
 // auto start
 setTimeout(()=>{ startQrListener(); startTableRequestListener(); renderQrInbox(); }, 1200);
