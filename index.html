@@ -1109,7 +1109,7 @@ const LS='induswok_pos_v1';
 // not a security boundary; protect Firestore and rotate this value before use.
 const DEV_SECRET_PIN='8746';
 const MENU_VERSION=3; // kept for legacy data; no longer triggers any auto-replace
-const APP_VERSION='15.2.1'; // v15.2.1: bill deletions sync via shared tombstone map (inactive phones can't resurrect cleared bills); version now visible on login screen
+const APP_VERSION='15.2.3'; // v15.2.3: Z-report & reprint now print on thermal (native bridge/RawBT) via raw ESC/POS text — no more browser popup page
 // v14: hardcoded defaults of the OLD Firebase project — scrubbed from saved data so
 // upgraded devices can't silently reconnect to the retired database.
 const OLD_FB_DEFAULTS={firebaseApiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM',firebaseProjectId:'induswokpos',firebaseAppId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec'};
@@ -2849,7 +2849,7 @@ function rawbtPrint(bill,kind){
   return sendToRawBT(text);
 }
 
-function doPrint(html,title,kind,bill){
+function doPrint(html,title,kind,bill,rawText){
   // Show an on-screen preview modal with a Print button.
   // This works in the sandboxed preview (you can SEE the receipt) AND in real Chrome
   // (the Print button opens a clean 80mm print window).
@@ -2858,6 +2858,9 @@ function doPrint(html,title,kind,bill){
   window.__printHTML=html;
   window.__printKind=kind;
   window.__printBill=bill||null;
+  window.__printRawText=rawText||null; // v15.2.2: Z-report & other non-bill receipts
+  // Thermal-capable when we have a bill object OR raw text (Z-report etc.)
+  const hasThermal=!!(bill||rawText);
   // Optional RawBT button (only useful on Android with the RawBT app)
   const rawbtBtn=`<button class="btn-ghost grow" onclick="sendToPrinter('${kind}',true)" title="Print via RawBT thermal app">📲 RawBT</button>`;
   const box=`<div class="box" style="max-width:${Math.max(w*3.9,300)}px">
@@ -2868,7 +2871,7 @@ function doPrint(html,title,kind,bill){
     </div>
     <div class="row" style="margin-top:12px">
       <button class="btn-ghost grow" onclick="closeModal()">Cancel</button>
-      ${bill?rawbtBtn:''}
+      ${hasThermal?rawbtBtn:''}
       <button class="btn-primary grow" onclick="sendToPrinter()">🖨️ Print Now</button>
     </div>
     <div class="muted" style="font-size:11px;margin-top:8px;text-align:center">Chrome: Margins → None · Scale → 100% · uncheck Headers/footers · or tap 📲 RawBT on Android.</div>
@@ -2879,16 +2882,18 @@ function sendToPrinter(kind,forceRawbt){
   const html=window.__printHTML||'';
   kind=kind||window.__printKind||'bill';
   const prof=printProfile(kind);
+  // v15.2.2: Z-report & friends carry their own ESC/POS text (no bill object)
+  const rawTxt=window.__printRawText?String(window.__printRawText).replace(/₹/g,'Rs.'):null;
   // v14.4: IndusWok Android app bridge - direct Bluetooth ESC/POS, no RawBT needed.
-  if(window.IWNativePrint && window.IWNativePrint.available && window.IWNativePrint.available() && window.__printBill){
+  if(window.IWNativePrint && window.IWNativePrint.available && window.IWNativePrint.available() && (window.__printBill||rawTxt)){
     try{
-      const t=(buildRawbtText(window.__printBill,kind==='kot')||'').replace(/₹/g,'Rs.');
+      const t=rawTxt||(buildRawbtText(window.__printBill,kind==='kot')||'').replace(/₹/g,'Rs.');
       if(window.IWNativePrint.print(t)){ try{closeModal&&closeModal();}catch(e){} return; }
     }catch(e){ console.warn('native print failed - falling back',e); }
   }
   // RawBT path: send raw ESC/POS text (with QR) to the RawBT Android app.
-  if((forceRawbt||prof.rawbt) && window.__printBill){
-    const ok=rawbtPrint(window.__printBill,kind);
+  if((forceRawbt||prof.rawbt) && (window.__printBill||rawTxt)){
+    const ok=rawTxt?sendToRawBT(rawTxt):rawbtPrint(window.__printBill,kind);
     if(ok){closeModal&&closeModal();return;}
   }
   const w=prof.roll,f=prof.font;
@@ -3450,7 +3455,7 @@ function renderReports(){
   const devTools=$('#developerBillTools'); if(devTools) devTools.style.display=isDeveloper()?'block':'none';
   updateArchiveStats();
 }
-function reprint(no){const b=findBill(no);if(b){doPrint(buildReceiptHTML(b,false),'🧾 Reprint '+b.no,'bill');} else {toast('Bill not found');}}
+function reprint(no){const b=findBill(no);if(b){doPrint(buildReceiptHTML(b,false),'🧾 Reprint '+b.no,'bill',b);} else {toast('Bill not found');}}
 
 function devFindBillRef(no){
   let i=(DB.bills||[]).findIndex(x=>x.no===no);
@@ -4250,12 +4255,44 @@ function testRawbtKOT(){
     totals:{sub:530,disc:0,cgst:0,sgst:0,total:530,gstOn:false},total:530};
   rawbtPrint(b,'kot');
 }
+// v15.2.2: ESC/POS text for the Z report so it prints on the THERMAL printer
+// (native bridge / RawBT) instead of opening a browser page.
+function buildZReportText(s, sum, top){
+  const set=DB.settings;
+  const BOLD_ON=ESC+'E\x01', BOLD_OFF=ESC+'E\x00';
+  const DH_ON=GS+'!\x11', DH_OFF=GS+'!\x00';
+  const AL_C=ESC+'a\x01', AL_L=ESC+'a\x00';
+  let o=ESC+'@'+AL_C;
+  o+=DH_ON+BOLD_ON+(set.name||'Indus Wok')+BOLD_OFF+DH_OFF+LF;
+  o+=BOLD_ON+'--- Z REPORT (DAY CLOSE) ---'+BOLD_OFF+LF;
+  o+=(s.date||'')+LF+AL_L+rbLine('-')+LF;
+  o+=rbLR('Open', s.openTime||'')+LF;
+  o+=rbLR('Close', s.closeTime||nowTime())+LF;
+  o+=rbLR('Opening Cash', rbMoney(s.openCash||0))+LF;
+  o+=rbLR('Bills', String(sum.count))+LF;
+  o+=rbLine('-')+LF;
+  o+=BOLD_ON+DH_ON+rbLR('GROSS SALES', rbMoney(sum.total))+DH_OFF+BOLD_OFF+LF;
+  o+=rbLR('Cash', rbMoney(sum.cash))+LF;
+  o+=rbLR('UPI', rbMoney(sum.upi))+LF;
+  o+=rbLR('Card', rbMoney(sum.card))+LF;
+  o+=rbLine('-')+LF;
+  if(top&&top.length){
+    o+=BOLD_ON+'Top Items'+BOLD_OFF+LF;
+    top.forEach(([n,q])=>{ o+=rbLR(String(n).length>20?String(n).slice(0,20):String(n),'x'+q)+LF; });
+    o+=rbLine('-')+LF;
+  }
+  o+=rbLR('Actual Cash', rbMoney(s.actualCash||0))+LF;
+  o+=AL_C+'Closed by '+(CUR&&CUR.name||'')+LF;
+  if(set.rawbtCut){o+=LF+GS+'V\x42\x00';}else{o+=LF+LF+LF;}
+  return o;
+}
 function printDayReport(sid){
   const s=DB.sessions.find(x=>x.id===sid);if(!s)return;
   const bills=DB.bills.filter(b=>b.sessionId===s.id);const sum=summarize(bills);
   const set=DB.settings,prof=printProfile('bill');
   const items={};bills.forEach(b=>b.items.forEach(i=>{items[i.name]=(items[i.name]||0)+i.qty;}));
   const top=Object.entries(items).sort((a,b)=>b[1]-a[1]).slice(0,12);
+  const zText=buildZReportText(s,sum,top);
   const html=`<div class="receipt" style="width:${prof.roll}mm;font-size:${prof.font}px">
     <div class="c b big">${set.name}</div><div class="c b">--- Z REPORT (DAY CLOSE) ---</div>
     <div class="c">${s.date}</div><hr>
@@ -4273,7 +4310,8 @@ function printDayReport(sid){
     <table>${top.map(([n,q])=>`<tr><td>${n}</td><td class="r">${q}</td></tr>`).join('')}</table><hr>
     <table><tr><td>Actual Cash</td><td class="r">${money(s.actualCash||0)}</td></tr></table>
     <div class="c" style="margin-top:6px">Closed by ${CUR.name}</div><br><br></div>`;
-  doPrint(html,'🔴 Day Close — Z Report','bill');
+  // v15.2.2: thermal printers get the raw ESC/POS text; browser gets preview+Print.
+  doPrint(html,'🔴 Day Close — Z Report','bill',null,zText);
 }
 
 /* ---------- SYNC (Firebase Firestore) — FIXED v12.4 Safe Multi-Device ---------- */
