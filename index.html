@@ -303,7 +303,7 @@
   <div class="login-card">
     <div class="logo"><img src="logo.png" alt="Indus Wok" style="width:120px;border-radius:18px;box-shadow:0 6px 18px rgba(0,0,0,.25)"></div>
     <div class="brand">Indus Wok</div>
-    <div class="brand-sub">Restaurant POS · v14 · Sync-Safe Edition</div>
+    <div class="brand-sub">Restaurant POS · <span id="loginVerBadge">v…</span> · Sync-Safe Edition</div>
     <div class="user-select" id="userSelect"></div>
     <div class="pin-dots" id="pinDots"></div>
     <div class="keypad" id="keypad"></div>
@@ -1109,7 +1109,7 @@ const LS='induswok_pos_v1';
 // not a security boundary; protect Firestore and rotate this value before use.
 const DEV_SECRET_PIN='8746';
 const MENU_VERSION=3; // kept for legacy data; no longer triggers any auto-replace
-const APP_VERSION='15.2.0'; // v15.2: bill deletions sync via shared tombstone map in the cloud doc — inactive phones can no longer resurrect cleared/settled bills; boot merge accepts only self-created bills; ts-less bills can't dodge the archive cutoff
+const APP_VERSION='15.2.1'; // v15.2.1: bill deletions sync via shared tombstone map (inactive phones can't resurrect cleared bills); version now visible on login screen
 // v14: hardcoded defaults of the OLD Firebase project — scrubbed from saved data so
 // upgraded devices can't silently reconnect to the retired database.
 const OLD_FB_DEFAULTS={firebaseApiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM',firebaseProjectId:'induswokpos',firebaseAppId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec'};
@@ -5409,7 +5409,8 @@ if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded
 /* === end v12.2 === */
 
 async function boot(){
-  console.log('IW v13.5 boot — print station + stale-phone sync hardening');
+  console.log('IW '+APP_VERSION+' boot — print station + stale-phone sync hardening');
+  try{ var vb=document.getElementById('loginVerBadge'); if(vb)vb.textContent='v'+APP_VERSION; }catch(e){}
   // Show the shell immediately, but do not allow login/session restore until a
   // server snapshot has been fetched. This is the protection against old-phone
   // localStorage silently becoming the restaurant's current state.
