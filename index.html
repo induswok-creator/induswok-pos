@@ -1109,7 +1109,7 @@ const LS='induswok_pos_v1';
 // not a security boundary; protect Firestore and rotate this value before use.
 const DEV_SECRET_PIN='8746';
 const MENU_VERSION=3; // kept for legacy data; no longer triggers any auto-replace
-const APP_VERSION='15.1.1'; // v14.1: settings form never auto-reverts; Firebase fields autofill from firebase-config.js
+const APP_VERSION='15.2.0'; // v15.2: bill deletions sync via shared tombstone map in the cloud doc — inactive phones can no longer resurrect cleared/settled bills; boot merge accepts only self-created bills; ts-less bills can't dodge the archive cutoff
 // v14: hardcoded defaults of the OLD Firebase project — scrubbed from saved data so
 // upgraded devices can't silently reconnect to the retired database.
 const OLD_FB_DEFAULTS={firebaseApiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM',firebaseProjectId:'induswokpos',firebaseAppId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec'};
@@ -1126,8 +1126,36 @@ const AUTO_ARCHIVE_KEEP=400; // keep max 400 live bills in main snapshot
 
 const DELETED_BILLS_KEY='iw_deleted_bills'; // local compatibility tombstones
 let _deletedBillNos = (()=>{ try{ return new Set(JSON.parse(localStorage.getItem(DELETED_BILLS_KEY)||'[]')); }catch(e){ return new Set(); } })();
-function addDeletedBillTombstone(no){ try{ _deletedBillNos.add(String(no)); localStorage.setItem(DELETED_BILLS_KEY, JSON.stringify([..._deletedBillNos].slice(-500))); }catch(e){} }
-function isDeletedBill(no){ return _deletedBillNos.has(String(no)); }
+// v15.2: bill deletions are synced via DB.deletedBills ({no:ts}) inside the main
+// doc — previously they were localStorage-only, so an inactive phone that still
+// held a cleared bill on disk re-uploaded it to every device on its next merge.
+const BILL_TOMBSTONE_RETENTION_MS=60*24*3600000; // keep deletion guards 60 days
+function _billTombTs(v){ return +(v&&(v.ts||v))||0; }
+function ensureDeletedBillsMap(d){ if(!d.deletedBills||typeof d.deletedBills!=='object'||Array.isArray(d.deletedBills))d.deletedBills={}; return d.deletedBills; }
+function billTs(b){
+  if(!b)return 0;
+  let t=+(b.ts||b.updatedAt)||0; if(t)return t;
+  const d=String(b.date||'').trim(), tm=String(b.time||'').trim();
+  if(d){ t=Date.parse(d.replace(/\//g,'-')+'T'+(tm||'00:00'))||0; if(!t)t=Date.parse(d)||0; }
+  return +t||0;
+}
+function addDeletedBillTombstone(no){
+  no=String(no||''); if(!no)return;
+  try{ _deletedBillNos.add(no); localStorage.setItem(DELETED_BILLS_KEY, JSON.stringify([..._deletedBillNos].slice(-500))); }catch(e){}
+  try{ const map=ensureDeletedBillsMap(DB), ts=Date.now(); if(ts>=_billTombTs(map[no]))map[no]={ts,by:DEVICE_ID}; }catch(e){}
+}
+function isDeletedBill(no){
+  no=String(no||'');
+  if(_deletedBillNos.has(no))return true;
+  try{ const map=(DB&&DB.deletedBills)||{}; return !!map[no]; }catch(e){ return false; }
+}
+function pruneBillTombstones(){
+  try{
+    if(!DB||!DB.deletedBills)return;
+    const cut=Date.now()-BILL_TOMBSTONE_RETENTION_MS;
+    Object.keys(DB.deletedBills).forEach(k=>{ if(_billTombTs(DB.deletedBills[k])<cut)delete DB.deletedBills[k]; });
+  }catch(e){}
+}
 
 // Cart deletions/settlements must be synchronized too. Without a tombstone, an
 // old phone that still has an order can re-add that order when it reconnects.
@@ -1252,6 +1280,12 @@ function load(){
     if(d.billsArchiveCutoff===undefined){
       try{ let mx=0; (d.archivedBills||[]).forEach(b=>{ const t=+((b&&(b.ts||b.updatedAt))||0)||0; if(t>mx)mx=t; }); d.billsArchiveCutoff=mx; }catch(e){ d.billsArchiveCutoff=0; }
     }
+    // v15.2: synced deletion guards + ts backfill so no bill can dodge filters
+    ensureDeletedBillsMap(d);
+    ['bills','archivedBills'].forEach(kk=>{ (d[kk]||[]).forEach(b=>{ if(b&&!(b.ts||b.updatedAt)){ const t=billTs(b); if(t)b.ts=t; } }); });
+    try{ let dirtySet=false; Object.keys(d.deletedBills||{}).forEach(no=>{ if(!_deletedBillNos.has(no)){_deletedBillNos.add(no);dirtySet=true;} });
+      if(dirtySet)localStorage.setItem(DELETED_BILLS_KEY, JSON.stringify([..._deletedBillNos].slice(-500))); }catch(e){}
+    pruneBillTombstones();
     if(!d._meta)d._meta={settingsAt:0,menuAt:0,usersAt:0};
     if(!d.settings.phone || d.settings.phone.includes('98765') || d.settings.phone.includes('8850231477')) d.settings.phone='8850241377';
     if(!d.settings.upi || d.settings.upi.includes('induswok@upi') || d.settings.upi==='Q781941663@ybl') d.settings.upi='Q781941663@ybl'; // PhonePe smart-speaker VPA — bill QRs announce on it
@@ -1320,9 +1354,12 @@ function liveRefreshAfterDataChange(src){
 }
 function _pruneArchivedDupes(){
   try{
+    // Strip bills that were deliberately deleted on ANY synced device.
+    DB.bills=(DB.bills||[]).filter(b=>!isDeletedBill(b&&(b.no||b.id)));
     const cut=DB.billsArchiveCutoff||0; if(!cut)return;
-    const tsOf=b=>+((b&&(b.ts||b.updatedAt))||0)||0;
-    DB.bills=(DB.bills||[]).filter(b=>{ const bt=tsOf(b); return !bt || bt>=cut; });
+    // v15.2: bills with no usable timestamp are older than any cutoff — drop
+    // them instead of letting them survive every archive/clear guard forever.
+    DB.bills=(DB.bills||[]).filter(b=>{ const bt=billTs(b); return bt?bt>=cut:false; });
   }catch(e){}
 }
 function save(){_pruneArchivedDupes();pruneEmptyCarts();markPendingWrite();persist();liveRefreshAfterDataChange('save');schedulePush();}
@@ -3505,9 +3542,14 @@ function devDeleteAllBills(scope){
   const msg=scope==='all'?`Delete ALL completed bills? Live: ${live}, Archive: ${arch}. Type DELETE to confirm.`:(scope==='live'?`Delete ALL LIVE completed bills (${live})? Type DELETE to confirm.`:`Delete ALL ARCHIVED bills (${arch})? Type DELETE to confirm.`);
   promptDlg(msg,'',function(v){
     if(String(v).trim()!=='DELETE'){toast('Cancelled');return;}
-    if(scope==='live'||scope==='all')DB.bills=[];
+    // v15.2: tombstone EVERY removed bill so inactive phones cannot resurrect
+    // them, and move the archive cutoff forward so ts-less stragglers die too.
+    const removed=(scope==='live'||scope==='all')?(DB.bills||[]):[];
+    const removedArch=(scope==='archive'||scope==='all')?(DB.archivedBills||[]):[];
+    removed.concat(removedArch).forEach(b=>{ if(b)addDeletedBillTombstone(b.no||b.id); });
+    if(scope==='live'||scope==='all'){ DB.billsArchiveCutoff=Date.now(); DB.bills=[]; }
     if(scope==='archive'||scope==='all')DB.archivedBills=[];
-    devAudit('delete_all_bills',{scope,live,arch});
+    devAudit('delete_all_bills',{scope,live,arch,tombstoned:removed.length+removedArch.length});
     save();renderReports();renderDash();toast('🗑️ Developer delete complete');
   });
 }
@@ -4312,8 +4354,11 @@ function snapshot(){
   const o={rev:_rev,ts:Date.now(),device:DEVICE_ID,deviceName:getDeviceName()||DEVICE_ID};
   SYNC_KEYS.forEach(k=>{
     if(k==='bills'){
-      // Only sync recent bills in main doc — old bills live in sharded collection + local archive
-      o[k]=(DB[k]||[]).slice(-AUTO_ARCHIVE_KEEP);
+      // Only sync recent bills in main doc — old bills live in sharded collection + local archive.
+      // v15.2: a tombstoned/archived bill must NEVER leave this device, even if a
+      // stale merge left one sitting in DB.bills — this is the final gate.
+      const cut=DB.billsArchiveCutoff||0;
+      o[k]=(DB[k]||[]).filter(b=>b&&!isDeletedBill(b.no||b.id)&&(!cut||billTs(b)>=cut)).slice(-AUTO_ARCHIVE_KEEP);
     } else {
       o[k]=DB[k];
     }
@@ -4321,6 +4366,8 @@ function snapshot(){
   o.carts=DB.carts||{};
   o.closedCarts=DB.closedCarts||{};
   o.cartTombstones=DB.cartTombstones||{};
+  try{pruneBillTombstones();}catch(e){}
+  o.deletedBills=DB.deletedBills||{};
   o.menuVersion=DB.menuVersion;
   o._meta=DB._meta||{settingsAt:0,menuAt:0,usersAt:0};
   o.billsArchiveCutoff=DB.billsArchiveCutoff||0;
@@ -4719,9 +4766,9 @@ function syncBill(b){ schedulePush(); }
 function mergeBillsKeepBoth(remoteBills, localBills){
   const out=[]; const map={};
   function key(b){return String((b&&(b.no||b.id))||'').trim() || ('__'+out.length+'_'+Math.random());}
-  function score(b){return +(b&&(b.ts||b.updatedAt||Date.parse((b.date||'')+' '+(b.time||''))||0))||0;}
-  // v12.6: respect deleted tombstones
-  const isDel = (b)=>{ try{ return _deletedBillNos && _deletedBillNos.has(String((b&&(b.no||b.id))||'')); }catch(e){ return false; } };
+  function score(b){return billTs(b);}
+  // v12.6/v15.2: respect deleted tombstones (synced map + local compat set)
+  const isDel = (b)=>{ try{ return isDeletedBill(String((b&&(b.no||b.id))||'')); }catch(e){ return false; } };
   (remoteBills||[]).forEach(b=>{ if(isDel(b)) return; const k=key(b); if(!map[k]){map[k]=b;out.push(b);} });
   (localBills||[]).forEach(b=>{ if(isDel(b)) return; const k=key(b); if(!map[k]){map[k]=b;out.push(b);} else if(score(b)>score(map[k])){ const i=out.indexOf(map[k]); if(i>=0)out[i]=b; map[k]=b; }});
   return out.sort((a,b)=>score(a)-score(b));
@@ -4905,19 +4952,44 @@ function applyRemote(j,opts){
   // device actually has pending offline writes. A clean old phone gets the
   // server snapshot instead of reintroducing stale records.
   try{
-    if(!initialAuthoritative)DB.bills=mergeBillsKeepBoth(DB.bills||[],localBills);
+    // v15.2: on the FIRST (boot) pull, a stale phone may contribute only bills it
+    // created ITSELF while offline. Anything else sitting on its old disk that is
+    // missing from the server was removed on purpose (cleared/deleted) — never
+    // resurrect it. Normal mid-session merges keep the offline-safe behaviour.
+    let localContrib=localBills;
+    if(opts.initial && !initialAuthoritative){
+      const beforeC=(localContrib||[]).length;
+      localContrib=(localBills||[]).filter(b=>b&&b.deviceId===DEVICE_ID&&!isDeletedBill(b.no||b.id));
+      if(beforeC!==localContrib.length)console.log('[sync] boot merge: ignoring '+(beforeC-localContrib.length)+' stale bills from other devices');
+    }
+    if(!initialAuthoritative)DB.bills=mergeBillsKeepBoth(DB.bills||[],localContrib);
     else DB.bills=Array.isArray(j.bills)?j.bills:[];
+    // v15.2: merge the SYNCED deletion tombstone map (union, newest ts wins,
+    // 60-day retention) — this is what stops cleared bills from ever returning.
+    try{
+      const map=ensureDeletedBillsMap(DB);
+      const inc=(j&&j.deletedBills&&typeof j.deletedBills==='object')?j.deletedBills:{};
+      const cutT=Date.now()-BILL_TOMBSTONE_RETENTION_MS;
+      Object.keys(inc).forEach(no=>{ const t=_billTombTs(inc[no]); if(t>=cutT&&t>=_billTombTs(map[no]))map[no]=inc[no]; });
+      pruneBillTombstones();
+      let dirtySet=false;
+      Object.keys(map).forEach(no=>{ if(!_deletedBillNos.has(no)){_deletedBillNos.add(no);dirtySet=true;} });
+      if(dirtySet)try{localStorage.setItem(DELETED_BILLS_KEY,JSON.stringify([..._deletedBillNos].slice(-500)));}catch(e2){}
+    }catch(e){console.warn('tombstone merge failed',e);}
     // v14.8fix: an absent bill can mean ARCHIVED, not lost. A waking-up phone that
     // still holds those bills used to merge them back and push them everywhere.
     // billsArchiveCutoff says: everything older than this was archived on purpose.
     const cut=Math.max(+(j&&j.billsArchiveCutoff||0)||0, DB.billsArchiveCutoff||0);
     if(cut>0){
       DB.billsArchiveCutoff=cut;
-      const tsOf=b=>+((b&&(b.ts||b.updatedAt))||0)||0;
       const before=(DB.bills||[]).length;
-      DB.bills=(DB.bills||[]).filter(b=>{ const bt=tsOf(b); return !bt || bt>=cut; });
+      // v15.2: no usable timestamp = older than any cutoff = gone for good.
+      DB.bills=(DB.bills||[]).filter(b=>{ const bt=billTs(b); return bt?bt>=cut:false; });
       if(before!==DB.bills.length) console.log('[sync] dropped '+(before-DB.bills.length)+' known-archived bills from a stale snapshot');
     }
+    // v15.2: final guard — nothing tombstoned on any device may survive a merge.
+    DB.bills=(DB.bills||[]).filter(b=>!isDeletedBill(b&&(b.no||b.id)));
+    DB.archivedBills=(DB.archivedBills||[]).filter(b=>!isDeletedBill(b&&(b.no||b.id)));
   }catch(e){console.warn('bill merge failed',e);}
   if(!DB.users || DB.users.length < 3){ DB.users = _savedUsers.length ? _savedUsers : (typeof seed==='function'?seed().users.slice():[]); }
   // v14: menuVersion/settings handled inside the loop above; no re-push triggers.
@@ -4933,11 +5005,10 @@ function applyRemote(j,opts){
       }
     }catch(e){}
   }
-  // v12.6: deleted bills tombstone handling — if a bill was deleted on any device, keep it deleted everywhere
+  // v12.6/v15.2: deleted bills tombstone handling — if a bill was deleted on any
+  // device, keep it deleted everywhere (synced map + local compat set)
   try{
-    if(_deletedBillNos && _deletedBillNos.size){
-      DB.bills = (DB.bills||[]).filter(b=>!_deletedBillNos.has(String(b.no||b.id||'')));
-    }
+    DB.bills = (DB.bills||[]).filter(b=>!isDeletedBill(String((b&&(b.no||b.id))||'')));
   }catch(e){}
 
   const beforePayCount=(DB.payments||[]).length;
