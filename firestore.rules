@@ -17,6 +17,16 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Sharded settled bills/recent bills used by the POS
+    match /induswok_bills/{billId} {
+      allow read, write: if true;
+    }
+
+    // Live device presence / multi-device status
+    match /pos_devices/{deviceId} {
+      allow read, write: if true;
+    }
+
     // Customer QR orders — the customer page creates/cancels, the POS reads,
     // accepts and cleans up old ones
     match /induswok_qr_orders/{orderId} {

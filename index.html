@@ -1109,7 +1109,7 @@ const LS='induswok_pos_v1';
 // not a security boundary; protect Firestore and rotate this value before use.
 const DEV_SECRET_PIN='8746';
 const MENU_VERSION=3; // kept for legacy data; no longer triggers any auto-replace
-const APP_VERSION='15.2.4'; // v15.2.4: clear error when Firebase rules block the remote-KOT print queue (publish rules incl. induswok_print_jobs)
+const APP_VERSION='15.2.5'; // v15.2.5: deleted bill hardening — dashboard/day close/Z report ignore tombstoned bills
 // v14: hardcoded defaults of the OLD Firebase project — scrubbed from saved data so
 // upgraded devices can't silently reconnect to the retired database.
 const OLD_FB_DEFAULTS={firebaseApiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM',firebaseProjectId:'induswokpos',firebaseAppId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec'};
@@ -1154,6 +1154,21 @@ function pruneBillTombstones(){
     if(!DB||!DB.deletedBills)return;
     const cut=Date.now()-BILL_TOMBSTONE_RETENTION_MS;
     Object.keys(DB.deletedBills).forEach(k=>{ if(_billTombTs(DB.deletedBills[k])<cut)delete DB.deletedBills[k]; });
+  }catch(e){}
+}
+// v15.2.5: one source of truth for sales/day-close/dashboard bill lists.
+// Developer-deleted bills can remain briefly in local cache or old devices; every
+// calculation must exclude numbers in the synced tombstone map.
+function billNoOf(b){ return String((b&&(b.no||b.id))||''); }
+function nonDeletedBills(list){ return (list||[]).filter(b=>b && !isDeletedBill(billNoOf(b))); }
+function currentLiveBills(){ try{return nonDeletedBills(DB&&DB.bills);}catch(e){return [];} }
+function billsForSessionId(sid){ sid=String(sid||''); return currentLiveBills().filter(b=>String(b.sessionId||'')===sid); }
+function billsForDateStr(d){ d=String(d||''); return currentLiveBills().filter(b=>String(b.date||'')===d); }
+function refreshSessionSummaryById(sid){
+  try{
+    const s=(DB.sessions||[]).find(x=>String(x.id)===String(sid||'')); if(!s)return;
+    s.summary=summarize(billsForSessionId(s.id));
+    s.updatedAt=Date.now();
   }catch(e){}
 }
 
@@ -1356,6 +1371,7 @@ function _pruneArchivedDupes(){
   try{
     // Strip bills that were deliberately deleted on ANY synced device.
     DB.bills=(DB.bills||[]).filter(b=>!isDeletedBill(b&&(b.no||b.id)));
+    DB.archivedBills=(DB.archivedBills||[]).filter(b=>!isDeletedBill(b&&(b.no||b.id)));
     const cut=DB.billsArchiveCutoff||0; if(!cut)return;
     // v15.2: bills with no usable timestamp are older than any cutoff — drop
     // them instead of letting them survive every archive/clear guard forever.
@@ -1790,7 +1806,7 @@ function dayIn(){
 
 function dayOut(auto){
   const s=curSession();if(!s){toast('No open day');return;}
-  const bills=DB.bills.filter(b=>b.sessionId===s.id);
+  const bills=billsForSessionId(s.id);
   const sum=summarize(bills);
   const exp=DB.expenses.filter(e=>e.ts>=s.openTS).reduce((a,b)=>a+b.amt,0);
   const expectedCash=s.openCash+sum.cash-DB.expenses.filter(e=>e.ts>=s.openTS&&e.mode==='Cash').reduce((a,b)=>a+b.amt,0);
@@ -1818,7 +1834,7 @@ function dayOut(auto){
 function confirmDayOut(sid){
   const s=DB.sessions.find(x=>x.id===sid);
   const actual=+$('#closeActual').value||0;
-  const bills=DB.bills.filter(b=>b.sessionId===s.id);const sum=summarize(bills);
+  const bills=billsForSessionId(s.id);const sum=summarize(bills);
   s.status='closed';s.closeTime=nowTime();s.closeTS=Date.now();s.actualCash=actual;s.updatedAt=Date.now();
   s.summary=sum;
   save();closeModal();updateDayBadge();renderDash();
@@ -1826,15 +1842,16 @@ function confirmDayOut(sid){
   toast('🔴 Day closed');
 }
 function summarize(bills){
+  bills=nonDeletedBills(bills);
   let total=0,cash=0,upi=0,card=0;
-  bills.forEach(b=>{total+=b.total;if(b.mode==='Cash')cash+=b.total;else if(b.mode==='UPI')upi+=b.total;else if(b.mode==='Card')card+=b.total;else{cash+=b.total;}});
+  bills.forEach(b=>{const amt=+(b.total||0);total+=amt;if(b.mode==='Cash')cash+=amt;else if(b.mode==='UPI')upi+=amt;else if(b.mode==='Card')card+=amt;else{cash+=amt;}});
   return {count:bills.length,total,cash,upi,card};
 }
 
 /* ---------- DASHBOARD ---------- */
 function renderDash(){
   const s=curSession();
-  const sBills=s?DB.bills.filter(b=>b.sessionId===s.id):(DB.bills.filter(b=>b.date===(typeof businessDate==='function'?businessDate():todayStr())));
+  const sBills=s?billsForSessionId(s.id):billsForDateStr((typeof businessDate==='function'?businessDate():todayStr()));
   const sum=summarize(sBills);
   $('#dashStats').innerHTML=stat('Today Sales',money(sum.total))+stat('Bills',sum.count)+stat('Cash',money(sum.cash))+stat('UPI',money(sum.upi))+stat('Card',money(sum.card))+stat('Avg Bill',money(sum.count?sum.total/sum.count:0));
   $('#daySessionInfo').innerHTML=(CUR&&CUR.role==='Partner')
@@ -1843,7 +1860,7 @@ function renderDash(){
   const tb=$('#todayBills tbody');tb.innerHTML='';
   sBills.slice().reverse().slice(0,30).forEach(b=>{tb.innerHTML+=`<tr><td>${b.no}</td><td>${b.table||'-'}</td><td>${b.type}</td><td>${money(b.total)}</td><td>${b.mode}</td><td>${b.time}</td></tr>`;});
   if(!sBills.length)tb.innerHTML='<tr><td colspan="6" class="muted">No bills yet.</td></tr>';
-  const items={};sBills.forEach(b=>b.items.forEach(i=>{const k=i.name+(i.size==='half'?' (H)':'');items[k]=items[k]||{q:0,s:0};items[k].q+=i.qty;items[k].s+=i.price*i.qty;}));
+  const items={};sBills.forEach(b=>(b.items||[]).forEach(i=>{const k=i.name+(i.size==='half'?' (H)':'');items[k]=items[k]||{q:0,s:0};items[k].q+=i.qty;items[k].s+=(+i.price||0)*(+i.qty||0);}));
   const top=Object.entries(items).sort((a,b)=>b[1].q-a[1].q).slice(0,10);
   const ti=$('#topItems tbody');ti.innerHTML=top.map(([n,v])=>`<tr><td>${n}</td><td>${v.q}</td><td>${money(v.s)}</td></tr>`).join('')||'<tr><td colspan="3" class="muted">No data</td></tr>';
 }
@@ -3435,7 +3452,8 @@ function getAllBills(includeArchived){
 }
 function findBill(no){
   const n=String(no);
-  return (DB.bills||[]).find(x=>String(x.no)===n) || (DB.archivedBills||[]).find(x=>String(x.no)===n) || (_recentShardedBills||[]).find(x=>String(x.no)===n) || null;
+  if(isDeletedBill(n))return null;
+  return nonDeletedBills(DB.bills||[]).find(x=>String(x.no)===n) || nonDeletedBills(DB.archivedBills||[]).find(x=>String(x.no)===n) || nonDeletedBills(_recentShardedBills||[]).find(x=>String(x.no)===n) || null;
 }
 function renderReports(){
   const f=$('#repFrom').value||'2000-01-01',t=$('#repTo').value||'2999-12-31';
@@ -3495,6 +3513,9 @@ function devDeleteBill(no){
     const old=JSON.parse(JSON.stringify(ref.bill));
     ref.list.splice(ref.index,1);
     addDeletedBillTombstone(no);
+    try{ _recentShardedBills=(_recentShardedBills||[]).filter(b=>String(b.no||b.id)!==String(no)); }catch(e){}
+    try{ if(firebaseEnabled()&&initFirebase()) _firestoreDB.collection(BILLS_COLLECTION).doc(String(no)).delete().catch(()=>{}); }catch(e){}
+    if(old.sessionId)refreshSessionSummaryById(old.sessionId);
     devAudit('delete_bill',{no,store:ref.store,total:old.total,deviceId:DEVICE_ID});
     save();renderReports();renderDash();toast('🗑️ Bill '+no+' deleted on all devices');
   },'Delete Bill');
@@ -3559,7 +3580,7 @@ function devDeleteAllBills(scope){
     const removed=(scope==='live'||scope==='all')?(DB.bills||[]):[];
     const removedArch=(scope==='archive'||scope==='all')?(DB.archivedBills||[]):[];
     removed.concat(removedArch).forEach(b=>{ if(b)addDeletedBillTombstone(b.no||b.id); });
-    if(scope==='live'||scope==='all'){ DB.billsArchiveCutoff=Date.now(); DB.bills=[]; }
+    if(scope==='live'||scope==='all'){ DB.billsArchiveCutoff=Date.now(); DB.bills=[]; try{(DB.sessions||[]).forEach(s=>{s.summary={count:0,total:0,cash:0,upi:0,card:0};s.updatedAt=Date.now();});}catch(e){} }
     if(scope==='archive'||scope==='all')DB.archivedBills=[];
     devAudit('delete_all_bills',{scope,live,arch,tombstoned:removed.length+removedArch.length});
     save();renderReports();renderDash();toast('🗑️ Developer delete complete');
@@ -3964,7 +3985,7 @@ let aiHistory=[];
 function renderAI(){if(!aiHistory.length){$('#aiChat').innerHTML='<div class="muted">👋 Hi! Ask me about your sales, stock, profit or vendors — or tap a quick button above.</div>';}}
 function aiPush(role,text){aiHistory.push({role,text});const box=$('#aiChat');box.innerHTML=aiHistory.map(m=>`<div style="margin:6px 0"><b style="color:${m.role==='you'?'#333':'var(--red)'}">${m.role==='you'?'You':'🤖 Assistant'}:</b> ${m.text}</div>`).join('');box.scrollTop=box.scrollHeight;}
 function bizSnapshot(){
-  const s=curSession();const bd = (typeof businessDate==='function'?businessDate():todayStr()); const tb=s?DB.bills.filter(b=>b.sessionId===s.id):DB.bills.filter(b=>b.date===bd);
+  const s=curSession();const bd = (typeof businessDate==='function'?businessDate():todayStr()); const tb=s?billsForSessionId(s.id):billsForDateStr(bd);
   const sum=summarize(tb);
   const exp=DB.expenses.filter(e=>_localDate(new Date(e.ts))===todayStr()).reduce((a,b)=>a+b.amt,0);
   const low=DB.inventory.filter(i=>i.qty<=i.min).map(i=>`${i.name} (${i.qty}${i.unit})`);
@@ -4295,9 +4316,9 @@ function buildZReportText(s, sum, top){
 }
 function printDayReport(sid){
   const s=DB.sessions.find(x=>x.id===sid);if(!s)return;
-  const bills=DB.bills.filter(b=>b.sessionId===s.id);const sum=summarize(bills);
+  const bills=billsForSessionId(s.id);const sum=summarize(bills);
   const set=DB.settings,prof=printProfile('bill');
-  const items={};bills.forEach(b=>b.items.forEach(i=>{items[i.name]=(items[i.name]||0)+i.qty;}));
+  const items={};bills.forEach(b=>(b.items||[]).forEach(i=>{items[i.name]=(items[i.name]||0)+(+i.qty||0);}));
   const top=Object.entries(items).sort((a,b)=>b[1]-a[1]).slice(0,12);
   const zText=buildZReportText(s,sum,top);
   const html=`<div class="receipt" style="width:${prof.roll}mm;font-size:${prof.font}px">
