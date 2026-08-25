@@ -1109,7 +1109,7 @@ const LS='induswok_pos_v1';
 // not a security boundary; protect Firestore and rotate this value before use.
 const DEV_SECRET_PIN='8746';
 const MENU_VERSION=3; // kept for legacy data; no longer triggers any auto-replace
-const APP_VERSION='15.2.3'; // v15.2.3: Z-report & reprint now print on thermal (native bridge/RawBT) via raw ESC/POS text — no more browser popup page
+const APP_VERSION='15.2.4'; // v15.2.4: clear error when Firebase rules block the remote-KOT print queue (publish rules incl. induswok_print_jobs)
 // v14: hardcoded defaults of the OLD Firebase project — scrubbed from saved data so
 // upgraded devices can't silently reconnect to the retired database.
 const OLD_FB_DEFAULTS={firebaseApiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM',firebaseProjectId:'induswokpos',firebaseAppId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec'};
@@ -2061,7 +2061,14 @@ async function remoteKotToRestaurant(key){
       createdAt: firebase.firestore.FieldValue.serverTimestamp(), createdAtMs: Date.now()
     });
     toast('🏠➡️🖨️ KOT queued — prints on the restaurant phone within ~20 seconds');
-  }catch(e){ toast('⚠️ Queued failed: '+e.message); }
+  }catch(e){
+    const msg=String(e&&e.message||'');
+    if(/permission|PERMISSION_DENIED/i.test(msg)){
+      toast('⚠️ Firebase rules block the print queue. Open Firebase Console → Firestore → Rules and publish the updated rules (they must include induswok_print_jobs), then retry.');
+    } else {
+      toast('⚠️ Queue failed: '+msg);
+    }
+  }
 }
 function printStationKOT(key) {
   const c = DB.carts[key];
