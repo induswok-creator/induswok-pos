@@ -12,10 +12,12 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
+import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
@@ -64,7 +66,15 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);          // localStorage — required by the POS
         s.setMediaPlaybackRequiresUserGesture(false);
-        web.setWebViewClient(new WebViewClient()); // keep all navigation inside the app
+        web.setWebViewClient(new WebViewClient() {
+            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                return handleExternalNavigation(request == null || request.getUrl() == null ? null : request.getUrl().toString());
+            }
+            @SuppressWarnings("deprecation")
+            @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return handleExternalNavigation(url);
+            }
+        });
         web.addJavascriptInterface(new PrinterBridge(), "IWNativePrint");
         web.loadUrl(APP_URL);
         setContentView(web);
@@ -104,6 +114,49 @@ public class MainActivity extends Activity {
     }
 
     private SharedPreferences prefs() { return getSharedPreferences(PREFS, MODE_PRIVATE); }
+
+    // ---------- external app links (WhatsApp / UPI) ----------
+    private boolean handleExternalNavigation(String url) {
+        if (url == null || url.trim().isEmpty()) return false;
+        try {
+            Uri u = Uri.parse(url);
+            String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase();
+            String host = u.getHost() == null ? "" : u.getHost().toLowerCase();
+            boolean isWhatsAppHost = host.equals("wa.me") || host.equals("api.whatsapp.com") || host.endsWith(".whatsapp.com");
+            boolean isExternal = scheme.equals("whatsapp") || scheme.equals("upi") || scheme.equals("intent") || isWhatsAppHost;
+            if (!isExternal) return false; // normal POS pages stay inside the app
+            openExternalUrl(url, true);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private boolean openExternalUrl(final String url, final boolean showError) {
+        if (url == null || url.trim().isEmpty()) return false;
+        try {
+            Uri uri = Uri.parse(url);
+            String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase();
+            if (scheme.equals("intent")) {
+                Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
+                try {
+                    if (intent.getPackage() != null && getPackageManager().resolveActivity(intent, 0) != null) {
+                        startActivity(intent);
+                        return true;
+                    }
+                } catch (Throwable ignored) {}
+                String fallback = intent.getStringExtra("browser_fallback_url");
+                if (fallback != null && !fallback.isEmpty()) return openExternalUrl(fallback, showError);
+                return false;
+            }
+            Intent i = new Intent(Intent.ACTION_VIEW, uri);
+            startActivity(i);
+            return true;
+        } catch (Throwable t) {
+            if (showError) toastOnUi("Install WhatsApp / UPI app first");
+            return false;
+        }
+    }
 
     // ---------- Bluetooth permission (Android 12+) ----------
     private void requestBtPermissionIfNeeded() {
@@ -191,6 +244,12 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface public void pickPrinter() { showPrinterPicker(); }
+
+        /** Open WhatsApp / UPI / other external app links outside the POS WebView. */
+        @JavascriptInterface public boolean openExternal(final String url) {
+            runOnUiThread(() -> openExternalUrl(url, true));
+            return true;
+        }
 
         /** "🔔 Enable Alerts" button inside the POS lands here in the app. */
         @JavascriptInterface public boolean enableOrderAlerts() {

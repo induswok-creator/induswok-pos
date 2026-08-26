@@ -1109,7 +1109,7 @@ const LS='induswok_pos_v1';
 // not a security boundary; protect Firestore and rotate this value before use.
 const DEV_SECRET_PIN='8746';
 const MENU_VERSION=3; // kept for legacy data; no longer triggers any auto-replace
-const APP_VERSION='15.2.5'; // v15.2.5: deleted bill hardening — dashboard/day close/Z report ignore tombstoned bills
+const APP_VERSION='15.2.6'; // v15.2.6: WhatsApp Pay opens the WhatsApp app directly via deep links/intents
 // v14: hardcoded defaults of the OLD Firebase project — scrubbed from saved data so
 // upgraded devices can't silently reconnect to the retired database.
 const OLD_FB_DEFAULTS={firebaseApiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM',firebaseProjectId:'induswokpos',firebaseAppId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec'};
@@ -3015,12 +3015,55 @@ function billWhatsAppText(b){
   lines.push((DB.settings&&DB.settings.thanks)||'Thank you!');
   return lines.join('\n');
 }
+function openExternalUrlSmart(url, fallbackUrl){
+  // v15.2.6: prefer native-app deep links. In the Android POS shell the bridge
+  // opens external apps; in Chrome/PWA, intent:// opens WhatsApp directly.
+  try{
+    if(window.IWNativePrint && window.IWNativePrint.openExternal){
+      try{ if(window.IWNativePrint.openExternal(url)) return true; }catch(e){}
+    }
+    const a=document.createElement('a');
+    a.href=url; a.target='_self'; a.rel='noopener';
+    document.body.appendChild(a); a.click(); setTimeout(()=>{try{a.remove();}catch(e){}},500);
+    if(fallbackUrl){
+      const start=Date.now();
+      const t=setTimeout(()=>{
+        try{
+          if(!document.hidden && Date.now()-start<2600){
+            const b=document.createElement('a'); b.href=fallbackUrl; b.target='_blank'; b.rel='noopener'; document.body.appendChild(b); b.click(); setTimeout(()=>{try{b.remove();}catch(e){}},500);
+          }
+        }catch(e){}
+      },1200);
+      const cancel=()=>{clearTimeout(t);document.removeEventListener('visibilitychange',cancel);window.removeEventListener('pagehide',cancel);};
+      document.addEventListener('visibilitychange',()=>{ if(document.hidden)cancel(); },{once:true});
+      window.addEventListener('pagehide',cancel,{once:true});
+    }
+    return true;
+  }catch(e){
+    if(fallbackUrl){ try{ window.open(fallbackUrl,'_blank'); return true; }catch(e2){} }
+    return false;
+  }
+}
 function openWhatsAppTo(phone, text){
   let ph=String(phone||'').replace(/\D/g,'');
   if(!ph){ ph=prompt('Customer WhatsApp number?','')||''; ph=ph.replace(/\D/g,''); }
   if(!ph){ toast('WhatsApp number required','warning'); return; }
   if(ph.length===10) ph='91'+ph;
-  window.open(`https://wa.me/${ph}?text=${encodeURIComponent(text)}`,'_blank');
+  const enc=encodeURIComponent(text||'');
+  const web=`https://wa.me/${ph}?text=${enc}`;
+  const app=`whatsapp://send?phone=${ph}&text=${enc}`;
+  const ua=navigator.userAgent||'';
+  toast('Opening WhatsApp…');
+  if(/Android/i.test(ua)){
+    // Native POS WebView bridge should receive whatsapp:// so Android can choose
+    // WhatsApp or WhatsApp Business. Chrome/PWA gets intent:// for direct app open.
+    if(window.IWNativePrint && window.IWNativePrint.openExternal){ openExternalUrlSmart(app, web); return; }
+    const intent=`intent://send?phone=${ph}&text=${enc}#Intent;scheme=whatsapp;package=com.whatsapp;S.browser_fallback_url=${encodeURIComponent(web)};end`;
+    openExternalUrlSmart(intent, web); return;
+  }
+  if(/iPhone|iPad|iPod/i.test(ua)){ openExternalUrlSmart(app, web); return; }
+  // Desktop: try WhatsApp Desktop first, then WhatsApp Web fallback.
+  openExternalUrlSmart(app, web);
 }
 function whatsAppBillObj(b, phone){ openWhatsAppTo(phone||b.phone, billWhatsAppText(b)); }
 function whatsAppCurrentBill(){
@@ -5743,8 +5786,8 @@ function onNewQrOrder(o){
       `Delivery: ${encodeURIComponent(o.deliveryPartner||'Self Pickup')}%0A`+
       `Total: ₹${total}%0A`+
       `Items: ${encodeURIComponent(items)}`;
-    // open in background new tab after 1.2s (so POS user sees it but not forced)
-    setTimeout(()=>{ try{ window.open(`https://wa.me/${waNum}?text=${msg}`, '_blank'); }catch(e){} }, 1400);
+    // Open via WhatsApp app/deep link instead of trapping wa.me inside the POS WebView.
+    setTimeout(()=>{ try{ openWhatsAppTo(waNum, decodeURIComponent(msg)); }catch(e){} }, 1400);
   }
   // auto-add to deliveryOrders / bills if you want
   try{
@@ -6043,8 +6086,8 @@ window.qrWhatsApp = function(fid){
   const o = qrOrders.find(x=>(x._fid||x.id)===fid); if(!o) return;
   const phone = (o.customerPhone||'').replace(/\D/g,'');
   if(!phone){ toast('No customer phone', 'warning'); return; }
-  const txt = encodeURIComponent(`Hi ${o.customerName||''}! This is Indus Wok 🥢\nYour order ${o.id||fid} is ${o.status||'received'}.\nTotal: ₹${o.total}\n${o.deliveryPartner? 'Delivery: '+o.deliveryPartner : ''}\nThank you!`);
-  window.open(`https://wa.me/91${phone.slice(-10)}?text=${txt}`, '_blank');
+  const txt = `Hi ${o.customerName||''}! This is Indus Wok 🥢\nYour order ${o.id||fid} is ${o.status||'received'}.\nTotal: ₹${o.total}\n${o.deliveryPartner? 'Delivery: '+o.deliveryPartner : ''}\nThank you!`;
+  openWhatsAppTo('91'+phone.slice(-10), txt);
 };
 
 // ---- QR CODE GENERATOR ----
