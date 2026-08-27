@@ -15,8 +15,10 @@ import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Message;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -66,6 +68,9 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);          // localStorage — required by the POS
         s.setMediaPlaybackRequiresUserGesture(false);
+        s.setJavaScriptCanOpenWindowsAutomatically(true);
+        s.setSupportMultipleWindows(false);
+        s.setCacheMode(WebSettings.LOAD_NO_CACHE); // always show latest POS/WhatsApp fixes
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 return handleExternalNavigation(request == null || request.getUrl() == null ? null : request.getUrl().toString());
@@ -75,7 +80,18 @@ public class MainActivity extends Activity {
                 return handleExternalNavigation(url);
             }
         });
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                try {
+                    WebView.HitTestResult hit = view == null ? null : view.getHitTestResult();
+                    String extra = hit == null ? null : hit.getExtra();
+                    if (handleExternalNavigation(extra)) return false;
+                } catch (Throwable ignored) {}
+                return false; // keep popups out of the POS WebView
+            }
+        });
         web.addJavascriptInterface(new PrinterBridge(), "IWNativePrint");
+        try { web.clearCache(true); } catch (Throwable ignored) {}
         web.loadUrl(APP_URL);
         setContentView(web);
 
@@ -119,6 +135,7 @@ public class MainActivity extends Activity {
     private boolean handleExternalNavigation(String url) {
         if (url == null || url.trim().isEmpty()) return false;
         try {
+            url = url.replace("&amp;", "&").trim();
             Uri u = Uri.parse(url);
             String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase();
             String host = u.getHost() == null ? "" : u.getHost().toLowerCase();
@@ -132,28 +149,86 @@ public class MainActivity extends Activity {
         }
     }
 
-    private boolean openExternalUrl(final String url, final boolean showError) {
-        if (url == null || url.trim().isEmpty()) return false;
+    private boolean openExternalUrl(final String rawUrl, final boolean showError) {
+        if (rawUrl == null || rawUrl.trim().isEmpty()) return false;
+        String url = rawUrl.replace("&amp;", "&").trim();
         try {
             Uri uri = Uri.parse(url);
             String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase();
+            String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase();
+
             if (scheme.equals("intent")) {
                 Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
-                try {
-                    if (intent.getPackage() != null && getPackageManager().resolveActivity(intent, 0) != null) {
-                        startActivity(intent);
-                        return true;
-                    }
-                } catch (Throwable ignored) {}
-                String fallback = intent.getStringExtra("browser_fallback_url");
-                if (fallback != null && !fallback.isEmpty()) return openExternalUrl(fallback, showError);
-                return false;
+                try { startActivity(intent); return true; }
+                catch (Throwable ignored) {
+                    String fallback = intent.getStringExtra("browser_fallback_url");
+                    if (fallback != null && !fallback.isEmpty()) return openExternalUrl(fallback, showError);
+                    return openWhatsAppUrl(url, showError);
+                }
             }
+
+            if (scheme.equals("whatsapp") || host.equals("wa.me") || host.equals("api.whatsapp.com") || host.endsWith(".whatsapp.com")) {
+                return openWhatsAppUrl(url, showError);
+            }
+
+            if (scheme.equals("upi")) {
+                Intent i = new Intent(Intent.ACTION_VIEW, uri);
+                startActivity(i);
+                return true;
+            }
+
             Intent i = new Intent(Intent.ACTION_VIEW, uri);
             startActivity(i);
             return true;
         } catch (Throwable t) {
             if (showError) toastOnUi("Install WhatsApp / UPI app first");
+            return false;
+        }
+    }
+
+    private boolean openWhatsAppUrl(final String rawUrl, final boolean showError) {
+        try {
+            String url = rawUrl == null ? "" : rawUrl.replace("&amp;", "&").trim();
+            Uri uri = Uri.parse(url);
+            String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase();
+            String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase();
+            String phone = "";
+            String text = "";
+
+            if (scheme.equals("whatsapp")) {
+                phone = uri.getQueryParameter("phone");
+                text = uri.getQueryParameter("text");
+            } else if (host.equals("wa.me")) {
+                String path = uri.getPath() == null ? "" : uri.getPath();
+                phone = path.replaceAll("[^0-9]", "");
+                text = uri.getQueryParameter("text");
+            } else if (host.equals("api.whatsapp.com") || host.endsWith(".whatsapp.com")) {
+                phone = uri.getQueryParameter("phone");
+                text = uri.getQueryParameter("text");
+            }
+
+            if (phone == null) phone = "";
+            phone = phone.replaceAll("[^0-9]", "");
+            if (text == null) text = "";
+
+            String wa = "whatsapp://send" + (phone.length() > 0 ? "?phone=" + phone + "&text=" + Uri.encode(text) : "?text=" + Uri.encode(text));
+            Intent base = new Intent(Intent.ACTION_VIEW, Uri.parse(wa));
+
+            // Try regular WhatsApp, then WhatsApp Business, then generic chooser.
+            String[] packages = new String[]{"com.whatsapp", "com.whatsapp.w4b", null};
+            Throwable last = null;
+            for (String pkg : packages) {
+                try {
+                    Intent i = new Intent(base);
+                    if (pkg != null) i.setPackage(pkg);
+                    startActivity(i);
+                    return true;
+                } catch (Throwable t) { last = t; }
+            }
+            if (showError) toastOnUi("WhatsApp not found — install WhatsApp first");
+            return false;
+        } catch (Throwable t) {
+            if (showError) toastOnUi("Could not open WhatsApp");
             return false;
         }
     }

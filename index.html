@@ -1109,7 +1109,7 @@ const LS='induswok_pos_v1';
 // not a security boundary; protect Firestore and rotate this value before use.
 const DEV_SECRET_PIN='8746';
 const MENU_VERSION=3; // kept for legacy data; no longer triggers any auto-replace
-const APP_VERSION='15.2.7'; // v15.2.7: WhatsApp Pay deep links + safe fallback for old Android app shell
+const APP_VERSION='15.2.8'; // v15.2.8: safer WhatsApp fallback + direct-open support for updated APK
 // v14: hardcoded defaults of the OLD Firebase project — scrubbed from saved data so
 // upgraded devices can't silently reconnect to the retired database.
 const OLD_FB_DEFAULTS={firebaseApiKey:'AIzaSyBHYkp_aqgewS7MUy2cfk3r98aXEftlcsM',firebaseProjectId:'induswokpos',firebaseAppId:'1:761865480325:web:2ff33ec8a2e00dd057e1ec'};
@@ -3059,11 +3059,12 @@ function openWhatsAppTo(phone, text){
     // WhatsApp or WhatsApp Business. Chrome/PWA gets intent:// for direct app open.
     if(window.IWNativePrint && window.IWNativePrint.openExternal){ openExternalUrlSmart(app, web); return; }
     if(window.IWNativePrint && !window.IWNativePrint.openExternal){
-      // Old installed APK cannot launch external apps from its WebView. Keep the
-      // old safe fallback instead of showing ERR_UNKNOWN_URL_SCHEME; update APK
-      // v15.4+ for one-tap WhatsApp opening inside the app.
-      toast('Update IndusWok app for direct WhatsApp. Opening fallback link…','warning');
-      try{ window.open(web,'_blank'); }catch(e){ location.href=web; }
+      // Old installed APK cannot launch external apps from its WebView. Do NOT
+      // open wa.me here: WhatsApp redirects to whatsapp:// and old WebView shows
+      // net::ERR_UNKNOWN_URL_SCHEME. Updated APK v15.5+ opens WhatsApp directly.
+      try{ navigator.clipboard && navigator.clipboard.writeText(text||''); }catch(e){}
+      toast('Old IndusWok APK detected. Install v15.5 WhatsApp Fix APK for direct WhatsApp opening. Message copied.','warning');
+      alert('Please install the latest IndusWok POS APK v15.5 WhatsApp Fix.\n\nYour current APK cannot open WhatsApp directly from inside the app. The WhatsApp message has been copied; paste it in WhatsApp manually for now.');
       return;
     }
     const intent=`intent://send?phone=${ph}&text=${enc}#Intent;scheme=whatsapp;package=com.whatsapp;S.browser_fallback_url=${encodeURIComponent(web)};end`;
